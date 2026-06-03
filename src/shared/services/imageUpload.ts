@@ -87,9 +87,19 @@ export async function loadHonorGallery(): Promise<HonorGalleryItem[]> {
     return []
   }
 
+  const toString = (value: unknown) => (typeof value === 'string' ? value : '')
+  const toHonors = (item: Record<string, unknown>): HonorGalleryItem => ({
+    id: toString(item.id) || String(Date.now() + Math.random()),
+    name: toString(item.name) || 'honor-image',
+    url: toString(item.url),
+    title: toString(item.title) || '荣誉照片',
+    desc: toString(item.desc) || '荣誉墙照片',
+    uploadedAt: toString(item.uploadedAt) || new Date().toISOString(),
+  })
+
   return response
     .map((item) => item as Record<string, unknown>)
-    .filter((item): item is HonorGalleryItem => {
+    .filter((item): item is Record<string, unknown> => {
       if (!item || typeof item !== 'object') {
         return false
       }
@@ -99,14 +109,7 @@ export async function loadHonorGallery(): Promise<HonorGalleryItem[]> {
         && typeof item.name === 'string'
       )
     })
-    .map((item) => ({
-      id: item.id,
-      name: item.name || 'honor-image',
-      url: item.url,
-      title: typeof item.title === 'string' ? item.title : '荣誉照片',
-      desc: typeof item.desc === 'string' ? item.desc : '荣誉墙照片',
-      uploadedAt: typeof item.uploadedAt === 'string' ? item.uploadedAt : new Date().toISOString(),
-    }))
+    .map(toHonors)
 }
 
 interface UploadImageInput {
