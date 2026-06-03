@@ -2,13 +2,16 @@ import {
   ArrowLeft, ArrowRight, CheckCircle2, CalendarDays, Copy, MapPinned, MessageCircle, ParkingCircle,
   Quote, School, ShieldCheck, Star, TrainFront, UsersRound,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AppHeader } from '../components/AppHeader'
-import { SectionTitle } from '../components/SectionTitle'
-import { WechatModal } from '../components/WechatModal'
-import { getInstitutionProfile, getMediaAsset } from '../lib/storage'
-import type { InstitutionProfile, MediaAsset } from '../types'
+import { AppHeader } from '../../../shared/components/AppHeader'
+import { SectionTitle } from '../../../shared/components/SectionTitle'
+import { WechatModal } from '../../../shared/components/WechatModal'
+import { useContentBundle } from '../../../shared/data-source'
+import { getMediaAsset } from '../../../shared/services/storage'
+import type { MediaAsset } from '../../../shared/types/media'
+import { ROUTES } from '../../../shared/constants/routes'
+import type { InstitutionProfile } from '../../../shared/types/institution'
 
 function iconByName(name: string) {
   switch (name) {
@@ -43,23 +46,14 @@ function buildAmapNearbyUrl(institution: InstitutionProfile) {
 }
 
 export function CampusPage() {
-  const [institution, setInstitution] = useState<InstitutionProfile>(() => getInstitutionProfile())
+  const { bundle } = useContentBundle()
+  const institution = bundle.institution
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('咨询机构详情')
   const [copyLabel, setCopyLabel] = useState('复制地址')
   const campusVideos = institution.promoVideoAssetIds
     .map((assetId) => getMediaAsset(assetId))
     .filter((asset): asset is MediaAsset => asset !== undefined && asset.kind === 'video')
-
-  useEffect(() => {
-    const refresh = () => setInstitution(getInstitutionProfile())
-    window.addEventListener('storage', refresh)
-    window.addEventListener('aggie-storage-change', refresh)
-    return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('aggie-storage-change', refresh)
-    }
-  }, [])
 
   const copyAddress = async () => {
     try {
@@ -86,7 +80,7 @@ export function CampusPage() {
                 <button className="button button-primary" onClick={() => { setModalTitle('预约机构咨询'); setModalOpen(true) }}>
                   微信咨询 <MessageCircle size={18} />
                 </button>
-                <Link className="button button-ghost" to="/"><ArrowLeft size={18} /> 返回首页</Link>
+                <Link className="button button-ghost" to={ROUTES.home}><ArrowLeft size={18} /> 返回首页</Link>
               </div>
             </div>
             <div className="campus-hero-panel">
@@ -263,7 +257,12 @@ export function CampusPage() {
           </div>
         </section>
       </main>
-      <WechatModal open={modalOpen} title={modalTitle} onClose={() => setModalOpen(false)} />
+      <WechatModal
+        open={modalOpen}
+        title={modalTitle}
+        qrImageUrl={bundle.contact.wechatQrImageUrl}
+        onClose={() => setModalOpen(false)}
+      />
     </>
   )
 }

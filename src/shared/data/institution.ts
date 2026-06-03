@@ -1,4 +1,8 @@
-import type { InstitutionProfile, QualityHighlight, TeacherProfile } from '../types'
+import type {
+  InstitutionProfile,
+  QualityHighlight,
+  TeacherProfile,
+} from '../types/institution'
 
 function makeAvatarDataUrl(label: string, accent: string) {
   const svg = `

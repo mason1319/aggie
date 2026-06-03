@@ -1,4 +1,4 @@
-import type { AdmissionSettings } from '../types'
+import type { AdmissionSettings } from '../types/admission'
 
 export const defaultAdmissionSettings: AdmissionSettings = {
   activeSeason: 'spring',

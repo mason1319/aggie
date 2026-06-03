@@ -1,4 +1,4 @@
-import type { Course } from '../types'
+import type { Course } from '../types/learning'
 
 const starterWords = [
   {

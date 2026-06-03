@@ -1,4 +1,4 @@
-import type { FeedbackEntry } from '../types'
+import type { FeedbackEntry } from '../types/feedback'
 
 function avatarDataUrl(label: string, accent: string) {
   const svg = `

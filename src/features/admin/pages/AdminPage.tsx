@@ -2,9 +2,10 @@ import {
   ArrowLeft, CalendarDays, Check, Eye, EyeOff, LockKeyhole, MapPinned, Plus, RotateCcw, Save,
   ShieldAlert, Trash2,
 } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { courses } from '../data/courses'
+import { courses } from '../../../shared/data/courses'
+import { getContentSnapshot, saveContentBundle, useContentBundle } from '../../../shared/data-source'
 import {
   getAdmissionSettings,
   getInstitutionProfile,
@@ -19,18 +20,21 @@ import {
   removeMediaAsset,
   updateMediaBinding,
   upsertMediaAsset,
-} from '../lib/storage'
+} from '../../../shared/services/storage'
 import type {
   AdmissionCampaign,
   AdmissionSettings,
   AdmissionStatus,
   CampaignKind,
+} from '../../../shared/types/admission'
+import type {
   InstitutionProfile,
-  MediaAsset,
   QualityHighlight,
   TeacherProfile,
   TimetableEntry,
-} from '../types'
+} from '../../../shared/types/institution'
+import type { MediaAsset } from '../../../shared/types/media'
+import { ROUTES } from '../../../shared/constants/routes'
 
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || 'aggie2026'
 
@@ -117,12 +121,21 @@ export function AdminPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loginError, setLoginError] = useState('')
-  const [settings, setSettings] = useState<AdmissionSettings>(() => getAdmissionSettings())
-  const [institution, setInstitution] = useState<InstitutionProfile>(() => getInstitutionProfile())
+  const { bundle } = useContentBundle()
+  const [settings, setSettings] = useState<AdmissionSettings>(() => bundle.admission)
+  const [institution, setInstitution] = useState<InstitutionProfile>(() => bundle.institution)
+  const [hydrated, setHydrated] = useState(false)
   const [selectedCourseId, setSelectedCourseId] = useState(courses[0].id)
   const [selectedUnitId, setSelectedUnitId] = useState(courses[0].units[0].id)
   const [selectedItemId, setSelectedItemId] = useState(courses[0].units[0].items[0].id)
   const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (hydrated) return
+    setSettings(bundle.admission)
+    setInstitution(bundle.institution)
+    setHydrated(true)
+  }, [bundle, hydrated])
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) ?? courses[0],
@@ -302,10 +315,16 @@ export function AdminPage() {
   }
 
   const save = () => {
-    saveAdmissionSettings(settings)
-    saveInstitutionProfile(institution)
-    setSaved(true)
-    window.setTimeout(() => setSaved(false), 2400)
+    void (async () => {
+      const snapshot = getContentSnapshot()
+      await saveContentBundle({
+        ...snapshot,
+        admission: settings,
+        institution,
+      })
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 2400)
+    })()
   }
 
   const reset = () => {
@@ -348,7 +367,7 @@ export function AdminPage() {
             <ShieldAlert size={18} />
             <span>这是本机演示方案，不适合直接公开上线。正式上线需接入真实管理员认证和数据库。</span>
           </div>
-          <Link to="/"><ArrowLeft size={16} /> 返回官网</Link>
+            <Link to={ROUTES.home}><ArrowLeft size={16} /> 返回官网</Link>
         </div>
       </div>
     )
@@ -363,7 +382,7 @@ export function AdminPage() {
           <p>当前配置仅保存在本机浏览器中</p>
         </div>
         <div className="admin-header-actions">
-          <Link className="button button-ghost" to="/"><ArrowLeft size={17} /> 查看官网</Link>
+          <Link className="button button-ghost" to={ROUTES.home}><ArrowLeft size={17} /> 查看官网</Link>
           <button className="button button-primary" onClick={save}><Save size={17} /> 保存修改</button>
         </div>
       </header>

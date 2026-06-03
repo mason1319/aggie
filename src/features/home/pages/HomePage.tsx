@@ -5,13 +5,16 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AppHeader } from '../components/AppHeader'
-import { SectionTitle } from '../components/SectionTitle'
-import { WechatModal } from '../components/WechatModal'
-import { courses } from '../data/courses'
-import { getAdmissionSettings, getFeedbackLibrary, getInstitutionProfile, getMediaAsset } from '../lib/storage'
-import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries } from '../lib/feedbackApi'
-import type { AdmissionCampaign, AdmissionSettings, InstitutionProfile, MediaAsset } from '../types'
+import { AppHeader } from '../../../shared/components/AppHeader'
+import { SectionTitle } from '../../../shared/components/SectionTitle'
+import { WechatModal } from '../../../shared/components/WechatModal'
+import { CAMPUS_ANCHORS, ROUTE, ROUTES } from '../../../shared/constants/routes'
+import { useContentBundle } from '../../../shared/data-source'
+import { getMediaAsset } from '../../../shared/services/storage'
+import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries } from '../../../shared/services/feedbackApi'
+import type { AdmissionCampaign } from '../../../shared/types/admission'
+import type { FeedbackEntry } from '../../../shared/types/feedback'
+import type { MediaAsset } from '../../../shared/types/media'
 
 const methods = [
   { icon: Image, title: '图片联想记忆', text: '把抽象单词变成生动画面，理解以后更容易记住。', color: 'mint' },
@@ -36,17 +39,12 @@ function CampaignIcon({ campaign }: { campaign: AdmissionCampaign }) {
 export function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('添加老师微信')
-  const [settings, setSettings] = useState<AdmissionSettings>(() => getAdmissionSettings())
-  const [institution, setInstitution] = useState<InstitutionProfile>(() => getInstitutionProfile())
-  const [feedbackEntries, setFeedbackEntries] = useState(() => getFeedbackLibrary().entries.slice(0, 3))
+  const { bundle } = useContentBundle()
+  const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>(() => bundle.feedback.entries.slice(0, 3))
   const [feedbackSource, setFeedbackSource] = useState<'cloud' | 'cache' | 'offline'>('cache')
+  const { admission: settings, institution, courses } = bundle
 
   useEffect(() => {
-    const refresh = () => {
-      setSettings(getAdmissionSettings())
-      setInstitution(getInstitutionProfile())
-      setFeedbackEntries(getFeedbackLibrary().entries.slice(0, 3))
-    }
     const syncFeedback = async () => {
       const result = await loadFeedbackEntries()
       setFeedbackEntries(result.entries.slice(0, 3))
@@ -54,17 +52,13 @@ export function HomePage() {
     }
     void syncFeedback()
     const interval = window.setInterval(() => { void syncFeedback() }, FEEDBACK_SYNC_INTERVAL_MS)
-    window.addEventListener('storage', refresh)
-    window.addEventListener('aggie-storage-change', refresh)
     return () => {
       window.clearInterval(interval)
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('aggie-storage-change', refresh)
     }
   }, [])
 
   const activeCampaign = useMemo(
-    () => settings.campaigns.find((campaign) => campaign.id === settings.activeSeason),
+    () => settings.campaigns.find((campaign: AdmissionCampaign) => campaign.id === settings.activeSeason),
     [settings],
   )
   const promoVideos = useMemo(
@@ -95,7 +89,7 @@ export function HomePage() {
                 <button className="button button-primary" onClick={() => openContact('预约免费英语体验课')}>
                   免费体验课 <ArrowRight size={18} />
                 </button>
-                <Link className="button button-ghost" to="/learn">
+                <Link className="button button-ghost" to={ROUTES.learn}>
                   <Play size={18} fill="currentColor" /> 立即体验学习
                 </Link>
               </div>
@@ -141,7 +135,7 @@ export function HomePage() {
             <SectionTitle eyebrow="课程体系" title="从发音基础到课内提升" description="不同阶段有不同重点，让孩子循序渐进地学会英语。" />
             <div className="course-grid">
               {courses.map((course) => (
-                <Link to="/learn" className={`course-card tone-${course.tone}`} key={course.id}>
+                <Link to={ROUTES.learn} className={`course-card tone-${course.tone}`} key={course.id}>
                   <div className="course-icon">{course.icon}</div>
                   <div>
                     <h3>{course.title}</h3>
@@ -172,7 +166,7 @@ export function HomePage() {
                 <span className="mini-label">学练一体</span>
                 <h2>一个单词，多种方式反复遇见</h2>
                 <p>先看图理解，再听音跟读，然后通过选择和拼写巩固。每一次练习都在帮助孩子把知识变成长期记忆。</p>
-                <Link to="/learn" className="text-link">体验完整学习流程 <ArrowRight size={17} /></Link>
+                <Link to={ROUTES.learn} className="text-link">体验完整学习流程 <ArrowRight size={17} /></Link>
               </div>
               <div className="path-steps">
                 {[
@@ -215,7 +209,7 @@ export function HomePage() {
                     </div>
                   ))}
                 </div>
-                <Link to="/learn" className="button button-primary">现在开始体验 <ArrowRight size={18} /></Link>
+                <Link to={ROUTES.learn} className="button button-primary">现在开始体验 <ArrowRight size={18} /></Link>
               </div>
             </div>
           </div>
@@ -246,7 +240,7 @@ export function HomePage() {
                 <h3>家长与学生反馈</h3>
                 <p>真实反馈可在独立页面上传并展示，支持图片和头像。当前同步状态：{feedbackSource === 'cloud' ? '云端已同步' : feedbackSource === 'cache' ? '本机缓存' : '离线缓存'}</p>
               </div>
-              <Link to="/feedback" className="text-link">打开反馈上传页 <ArrowRight size={17} /></Link>
+              <Link to={ROUTES.feedback} className="text-link">打开反馈上传页 <ArrowRight size={17} /></Link>
             </div>
             <div className="feedback-preview-grid">
               {feedbackEntries.map((entry) => (
@@ -287,27 +281,27 @@ export function HomePage() {
                     ))}
                   </div>
                 </div>
-                <Link to="/campus#teachers" className="button button-primary">
+                <Link to={ROUTE.campusWithHash(CAMPUS_ANCHORS.teachers)} className="button button-primary">
                   查看师资详情 <ArrowUpRight size={17} />
                 </Link>
               </div>
               <div className="campus-side-grid">
-                <Link to="/campus#map" className="campus-overview-tile">
+                <Link to={ROUTE.campusWithHash(CAMPUS_ANCHORS.environment)} className="campus-overview-tile">
                   <MapPinned size={22} />
                   <strong>机构地址与地图</strong>
                   <span>{institution.address}</span>
                 </Link>
-                <Link to="/campus#environment" className="campus-overview-tile">
+                <Link to={ROUTE.campusWithHash(CAMPUS_ANCHORS.environment)} className="campus-overview-tile">
                   <UsersRound size={22} />
                   <strong>周边环境</strong>
                   <span>{institution.surroundingsSummary}</span>
                 </Link>
-                <Link to="/campus#quality" className="campus-overview-tile">
+                <Link to={ROUTE.campusWithHash(CAMPUS_ANCHORS.quality)} className="campus-overview-tile">
                   <School size={22} />
                   <strong>教学质量</strong>
                   <span>{institution.qualityHighlights[0]?.description}</span>
                 </Link>
-                <Link to="/campus#schedule" className="campus-overview-tile">
+                <Link to={ROUTE.campusWithHash(CAMPUS_ANCHORS.schedule)} className="campus-overview-tile">
                   <CalendarDays size={22} />
                   <strong>周课表</strong>
                   <span>{institution.timetable[0]?.day} {institution.timetable[0]?.startTime} · {institution.timetable[0]?.className}</span>
@@ -327,7 +321,7 @@ export function HomePage() {
               </div>
             )}
             <div className="admission-grid">
-              {settings.campaigns.map((campaign) => {
+              {settings.campaigns.map((campaign: AdmissionCampaign) => {
                 const isActive = campaign.id === 'trial' || campaign.id === settings.activeSeason
                 return (
                   <article className={`admission-card ${isActive ? 'featured' : ''}`} key={campaign.id} style={{ '--campaign-accent': campaign.accent } as React.CSSProperties}>
@@ -374,15 +368,20 @@ export function HomePage() {
         <div className="container footer-inner">
           <div className="brand footer-brand"><span className="brand-mark"><BookOpenCheck size={21} /></span><span><strong>Aggie速记英语</strong><small>听得懂 · 读得准 · 记得牢</small></span></div>
           <div className="footer-links">
-            <Link to="/learn">学习体验</Link>
-            <Link to="/campus">机构展示</Link>
-            <Link to="/admin">招生管理</Link>
+            <Link to={ROUTES.learn}>学习体验</Link>
+            <Link to={ROUTES.campus}>机构展示</Link>
+            <Link to={ROUTES.admin}>招生管理</Link>
             <button onClick={() => openContact()}>微信咨询</button>
           </div>
           <p>© 2026 Aggie速记英语 · 首版为本地体验项目</p>
         </div>
       </footer>
-      <WechatModal open={modalOpen} title={modalTitle} onClose={() => setModalOpen(false)} />
+      <WechatModal
+        open={modalOpen}
+        title={modalTitle}
+        qrImageUrl={bundle.contact.wechatQrImageUrl}
+        onClose={() => setModalOpen(false)}
+      />
     </>
   )
 }

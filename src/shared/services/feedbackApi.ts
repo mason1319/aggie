@@ -1,5 +1,5 @@
 import { getFeedbackLibrary, saveFeedbackLibrary } from './storage'
-import type { FeedbackEntry, FeedbackRole } from '../types'
+import type { FeedbackEntry, FeedbackRole } from '../types/feedback'
 
 const FEEDBACK_API_PATH = '/api/feedback'
 const FEEDBACK_SYNC_INTERVAL_MS = 60_000

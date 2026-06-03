@@ -1,17 +1,11 @@
 import { defaultAdmissionSettings } from '../data/admissions'
 import { defaultFeedbackEntries } from '../data/feedback'
 import { defaultInstitutionProfile } from '../data/institution'
-import type {
-  AdmissionSettings,
-  FeedbackEntry,
-  FeedbackLibrary,
-  InstitutionProfile,
-  MediaAsset,
-  MediaBinding,
-  MediaLibrary,
-  PracticeResult,
-  ProgressState,
-} from '../types'
+import type { AdmissionSettings } from '../types/admission'
+import type { FeedbackEntry, FeedbackLibrary } from '../types/feedback'
+import type { InstitutionProfile } from '../types/institution'
+import type { MediaAsset, MediaBinding, MediaLibrary } from '../types/media'
+import type { PracticeResult, ProgressState } from '../types/learning'
 
 export const STORAGE_KEYS = {
   progress: 'aggie_english_progress_v1',

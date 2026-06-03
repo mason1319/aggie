@@ -1,11 +1,13 @@
 import { ArrowLeft, BadgeCheck, Cloud, MessageSquareMore, Plus, RefreshCcw, School, Sparkles, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AppHeader } from '../components/AppHeader'
-import { SectionTitle } from '../components/SectionTitle'
-import { getFeedbackLibrary } from '../lib/storage'
-import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries, submitFeedbackEntry } from '../lib/feedbackApi'
-import type { FeedbackEntry, FeedbackRole } from '../types'
+import { AppHeader } from '../../../shared/components/AppHeader'
+import { SectionTitle } from '../../../shared/components/SectionTitle'
+import { useContentBundle } from '../../../shared/data-source'
+import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries, submitFeedbackEntry } from '../../../shared/services/feedbackApi'
+import { ROUTES } from '../../../shared/constants/routes'
+import { getFeedbackLibrary } from '../../../shared/services/storage'
+import type { FeedbackEntry, FeedbackRole } from '../../../shared/types/feedback'
 
 function makeAvatarDataUrl(label: string, accent: string) {
   const svg = `
@@ -32,7 +34,11 @@ function sourceLabel(source: 'cloud' | 'cache' | 'offline') {
 }
 
 export function FeedbackPage() {
-  const [entries, setEntries] = useState<FeedbackEntry[]>(() => getFeedbackLibrary().entries)
+  const { bundle } = useContentBundle()
+  const [entries, setEntries] = useState<FeedbackEntry[]>(() => bundle.feedback.entries)
+  useEffect(() => {
+    setEntries(bundle.feedback.entries)
+  }, [bundle.feedback.entries])
   const [role, setRole] = useState<FeedbackRole>('家长')
   const [name, setName] = useState('')
   const [subtitle, setSubtitle] = useState('')
@@ -174,7 +180,7 @@ export function FeedbackPage() {
                 <span>{loading ? '正在同步云端数据…' : sourceLabel(source)}</span>
               </div>
               <div className="feedback-hero-actions">
-                <Link to="/" className="button button-ghost full"><ArrowLeft size={17} /> 返回首页</Link>
+                <Link to={ROUTES.home} className="button button-ghost full"><ArrowLeft size={17} /> 返回首页</Link>
                 <button className="button button-primary full" onClick={() => void refreshEntries()}><RefreshCcw size={17} /> 刷新云端内容</button>
               </div>
             </div>

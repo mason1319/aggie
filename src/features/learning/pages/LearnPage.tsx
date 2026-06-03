@@ -4,9 +4,11 @@ import {
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { courses } from '../data/courses'
-import { getMediaAsset, getMediaBinding, getProgress, savePracticeResult, saveProgress } from '../lib/storage'
-import type { MediaAsset, PracticeMode, ProgressState } from '../types'
+import { useContentBundle } from '../../../shared/data-source'
+import { getMediaAsset, getMediaBinding, getProgress, savePracticeResult, saveProgress } from '../../../shared/services/storage'
+import type { MediaAsset } from '../../../shared/types/media'
+import type { PracticeMode, ProgressState } from '../../../shared/types/learning'
+import { ROUTES } from '../../../shared/constants/routes'
 
 const modeLabels: Record<PracticeMode, { label: string; icon: typeof Image }> = {
   image: { label: '看图选词', icon: Image },
@@ -37,11 +39,13 @@ function playMedia(asset: MediaAsset | undefined, fallbackText: string, onUnsupp
 }
 
 export function LearnPage() {
+  const { bundle } = useContentBundle()
   const [progress, setProgress] = useState<ProgressState>(() => getProgress())
   const [mode, setMode] = useState<PracticeMode | null>(null)
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null)
   const [spellAnswer, setSpellAnswer] = useState('')
   const [speechWarning, setSpeechWarning] = useState(false)
+  const courses = bundle.courses
 
   const course = courses.find((item) => item.id === progress.courseId) ?? courses[1]
   const unit = course.units.find((item) => item.id === progress.unitId) ?? course.units[0]
@@ -129,7 +133,7 @@ export function LearnPage() {
   return (
     <div className="learn-page">
       <header className="learn-header">
-        <Link to="/" className="brand">
+        <Link to={ROUTES.home} className="brand">
           <span className="brand-mark"><BookOpen size={22} /></span>
           <span><strong>Aggie学习体验</strong><small>每天进步一点点</small></span>
         </Link>
@@ -137,7 +141,7 @@ export function LearnPage() {
           <span><Trophy size={17} /> 已掌握 <strong>{progress.learnedItemIds.length}</strong></span>
           <span><CircleAlert size={17} /> 错词 <strong>{progress.wrongItemIds.length}</strong></span>
         </div>
-        <Link className="button button-small button-ghost" to="/"><ArrowLeft size={17} /> 返回官网</Link>
+        <Link className="button button-small button-ghost" to={ROUTES.home}><ArrowLeft size={17} /> 返回官网</Link>
       </header>
 
       {speechWarning && (
