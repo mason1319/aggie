@@ -152,6 +152,7 @@ export interface FeedbackEntry {
   content: string
   avatarUrl: string
   imageUrl?: string
+  contact?: string
   createdAt: string
 }
 

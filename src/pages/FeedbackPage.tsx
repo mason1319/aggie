@@ -1,13 +1,10 @@
-import { ArrowLeft, BadgeCheck, MessageSquareMore, Plus, School, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, Cloud, MessageSquareMore, Plus, RefreshCcw, School, Sparkles, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AppHeader } from '../components/AppHeader'
 import { SectionTitle } from '../components/SectionTitle'
-import {
-  addFeedbackEntry,
-  getFeedbackLibrary,
-  removeFeedbackEntry,
-} from '../lib/storage'
+import { getFeedbackLibrary } from '../lib/storage'
+import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries, submitFeedbackEntry } from '../lib/feedbackApi'
 import type { FeedbackEntry, FeedbackRole } from '../types'
 
 function makeAvatarDataUrl(label: string, accent: string) {
@@ -28,27 +25,74 @@ function makeAvatarDataUrl(label: string, accent: string) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
+function sourceLabel(source: 'cloud' | 'cache' | 'offline') {
+  if (source === 'cloud') return '云端已同步'
+  if (source === 'cache') return '本机缓存'
+  return '离线缓存'
+}
+
 export function FeedbackPage() {
   const [entries, setEntries] = useState<FeedbackEntry[]>(() => getFeedbackLibrary().entries)
   const [role, setRole] = useState<FeedbackRole>('家长')
   const [name, setName] = useState('')
   const [subtitle, setSubtitle] = useState('')
+  const [contact, setContact] = useState('')
   const [content, setContent] = useState('')
   const [avatarUrl, setAvatarUrl] = useState(makeAvatarDataUrl('反馈', '#7bc8a4'))
   const [imageUrl, setImageUrl] = useState('')
-  const [saveState, setSaveState] = useState<'idle' | 'saved'>('idle')
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [source, setSource] = useState<'cloud' | 'cache' | 'offline'>('cache')
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+
+  const refreshEntries = async () => {
+    try {
+      setLoading(true)
+      const result = await loadFeedbackEntries()
+      setEntries(result.entries)
+      setSource(result.source)
+      setError('')
+    } catch {
+      setError('云端反馈暂时不可用，请稍后重试。')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const refresh = () => setEntries(getFeedbackLibrary().entries)
-    window.addEventListener('storage', refresh)
-    window.addEventListener('aggie-storage-change', refresh)
+    void refreshEntries()
+
+    const syncFromCache = () => {
+      setEntries(getFeedbackLibrary().entries)
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshEntries()
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshEntries()
+    }, FEEDBACK_SYNC_INTERVAL_MS)
+
+    window.addEventListener('storage', syncFromCache)
+    window.addEventListener('aggie-storage-change', syncFromCache)
+    window.addEventListener('focus', handleVisibility)
+    document.addEventListener('visibilitychange', handleVisibility)
+
     return () => {
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener('aggie-storage-change', refresh)
+      window.clearInterval(interval)
+      window.removeEventListener('storage', syncFromCache)
+      window.removeEventListener('aggie-storage-change', syncFromCache)
+      window.removeEventListener('focus', handleVisibility)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [])
 
   const summary = useMemo(() => ({
+    total: entries.length,
     parentCount: entries.filter((entry) => entry.role === '家长').length,
     studentCount: entries.filter((entry) => entry.role === '学生').length,
   }), [entries])
@@ -57,27 +101,36 @@ export function FeedbackPage() {
     setRole('家长')
     setName('')
     setSubtitle('')
+    setContact('')
     setContent('')
     setAvatarUrl(makeAvatarDataUrl('反馈', '#7bc8a4'))
     setImageUrl('')
   }
 
-  const submit = () => {
+  const submit = async () => {
     if (!name.trim() || !content.trim()) return
-    addFeedbackEntry({
-      id: `feedback-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      role,
-      name: name.trim(),
-      subtitle: subtitle.trim() || (role === '家长' ? '家长反馈' : '学生反馈'),
-      content: content.trim(),
-      avatarUrl,
-      imageUrl: imageUrl.trim() || undefined,
-      createdAt: new Date().toISOString(),
-    })
-    setEntries(getFeedbackLibrary().entries)
-    setSaveState('saved')
-    window.setTimeout(() => setSaveState('idle'), 2000)
-    resetForm()
+    setSubmitting(true)
+    setError('')
+    try {
+      const result = await submitFeedbackEntry({
+        role,
+        name,
+        subtitle: subtitle.trim() || (role === '家长' ? '家长反馈' : '学生反馈'),
+        contact,
+        content,
+        avatarUrl,
+        imageUrl: imageUrl.trim() || undefined,
+      })
+      setEntries(result.entries)
+      setSource(result.source)
+      setNotice(result.source === 'cloud' ? '反馈已同步到云端。' : '云端暂不可用，已先保存到本机缓存。')
+      resetForm()
+      window.setTimeout(() => setNotice(''), 2800)
+    } catch {
+      setError('提交失败，请稍后再试。')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const uploadAvatar = async (file: File | undefined) => {
@@ -101,11 +154,11 @@ export function FeedbackPage() {
         <section className="feedback-hero">
           <div className="container feedback-hero-grid">
             <div>
-              <span className="mini-label">家长与学生反馈</span>
-              <h1>上传真实反馈，让招生页更有说服力</h1>
-              <p>支持家长评价、学生学习感受、图片附件和头像展示。当前数据保存在本机浏览器中，便于先做内容设计和页面演示。</p>
+              <span className="mini-label">家长与学生反馈提交</span>
+              <h1>把真实反馈，沉淀成招生页最有力的证据</h1>
+              <p>支持家长评价、学生学习感受、头像与图片附件。提交后会优先写入云端反馈库，并同步到首页展示区。</p>
               <div className="feedback-stats">
-                <div><strong>{entries.length}</strong><span>条反馈</span></div>
+                <div><strong>{summary.total}</strong><span>条反馈</span></div>
                 <div><strong>{summary.parentCount}</strong><span>家长反馈</span></div>
                 <div><strong>{summary.studentCount}</strong><span>学生反馈</span></div>
               </div>
@@ -113,10 +166,17 @@ export function FeedbackPage() {
             <div className="feedback-hero-card">
               <div className="feedback-hero-card-top">
                 <BadgeCheck size={20} />
-                <strong>反馈上传页</strong>
+                <strong>云端反馈提交</strong>
               </div>
-              <p>可以直接上传“家长评价”“学生感受”，并作为官网素材展示。</p>
-              <Link to="/" className="button button-primary full"><ArrowLeft size={17} /> 返回首页</Link>
+              <p>用于沉淀家长口碑、学生进步案例和招生素材。支持图片上传，适合正式招生官网展示。</p>
+              <div className="feedback-hero-note">
+                <Cloud size={16} />
+                <span>{loading ? '正在同步云端数据…' : sourceLabel(source)}</span>
+              </div>
+              <div className="feedback-hero-actions">
+                <Link to="/" className="button button-ghost full"><ArrowLeft size={17} /> 返回首页</Link>
+                <button className="button button-primary full" onClick={() => void refreshEntries()}><RefreshCcw size={17} /> 刷新云端内容</button>
+              </div>
             </div>
           </div>
         </section>
@@ -124,7 +184,12 @@ export function FeedbackPage() {
         <section className="section">
           <div className="container feedback-layout">
             <div className="feedback-form-card">
-              <SectionTitle align="left" eyebrow="上传反馈" title="填写反馈内容并提交" description="可上传头像和图片，适合后续做招生展示。" />
+              <SectionTitle align="left" eyebrow="提交反馈" title="填写内容并上传到云端" description="可上传头像和图片，建议写真实场景和具体变化，便于后续招生展示。" />
+              <div className="feedback-audit-strip">
+                <span>提交后自动同步云端</span>
+                <span>支持家长 / 学生两类反馈</span>
+                <span>可附图和头像</span>
+              </div>
               <div className="form-grid">
                 <label>
                   角色
@@ -136,13 +201,17 @@ export function FeedbackPage() {
                   姓名 / 昵称
                   <input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：李女士 / 小宇" />
                 </label>
+                <label>
+                  联系方式 / 微信（选填）
+                  <input value={contact} onChange={(event) => setContact(event.target.value)} placeholder="例如：138****1234 / WeChat ID" />
+                </label>
                 <label className="span-two">
                   头衔 / 年级
                   <input value={subtitle} onChange={(event) => setSubtitle(event.target.value)} placeholder="例如：三年级家长 / 五年级学生" />
                 </label>
                 <label className="span-two">
                   反馈内容
-                  <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="填写真实反馈内容" />
+                  <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="填写真实反馈内容，比如学习变化、课堂感受、家长反馈。" />
                 </label>
                 <label>
                   头像上传
@@ -161,17 +230,25 @@ export function FeedbackPage() {
                   <strong>{name || '姓名 / 昵称'}</strong>
                   <span>{subtitle || '头衔 / 年级'}</span>
                   <p>{content || '反馈内容预览'}</p>
+                  {contact && <small>{contact}</small>}
                   {imageUrl && <img src={imageUrl} alt="反馈图片预览" className="feedback-preview-image" />}
                 </div>
               </div>
               <div className="feedback-form-actions">
-                <button className="button button-primary" onClick={submit}><Plus size={17} /> 提交反馈</button>
-                {saveState === 'saved' && <span className="save-tip">已保存到本机</span>}
+                <button className="button button-primary" onClick={() => void submit()} disabled={submitting}>
+                  <Plus size={17} /> {submitting ? '提交中…' : '提交反馈'}
+                </button>
+                {notice && <span className="save-tip save-tip-success">{notice}</span>}
+                {error && <span className="save-tip save-tip-error">{error}</span>}
               </div>
             </div>
 
             <div className="feedback-list">
-              <SectionTitle align="left" eyebrow="反馈展示" title="家长与学生的真实反馈" description="提交后会自动出现在这里，可用于招生页或机构页展示。" />
+              <SectionTitle align="left" eyebrow="云端展示墙" title="最近提交的家长与学生反馈" description="这里展示的是云端反馈库中的最新内容，会随提交自动刷新。" />
+              <div className="feedback-list-meta">
+                <span>{sourceLabel(source)}</span>
+                <span>{loading ? '正在更新…' : `最新 ${entries.length} 条`}</span>
+              </div>
               <div className="feedback-card-grid">
                 {entries.map((entry) => (
                   <article className="feedback-card" key={entry.id}>
@@ -181,13 +258,10 @@ export function FeedbackPage() {
                         <strong>{entry.name}</strong>
                         <span>{entry.subtitle}</span>
                       </div>
-                      <button className="icon-button" onClick={() => { removeFeedbackEntry(entry.id); setEntries(getFeedbackLibrary().entries) }} aria-label={`删除 ${entry.name}`}>
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                    <div className="feedback-role-badge">
-                      {entry.role === '家长' ? <Users size={15} /> : <School size={15} />}
-                      <span>{entry.role}</span>
+                      <span className="feedback-role-badge compact">
+                        {entry.role === '家长' ? <Users size={15} /> : <School size={15} />}
+                        <span>{entry.role}</span>
+                      </span>
                     </div>
                     <p>{entry.content}</p>
                     {entry.imageUrl && <img src={entry.imageUrl} alt={entry.name} className="feedback-card-image" />}
@@ -199,9 +273,28 @@ export function FeedbackPage() {
                 <div className="feedback-empty">
                   <MessageSquareMore size={22} />
                   <strong>还没有反馈</strong>
-                  <span>先在左侧上传第一条家长或学生反馈。</span>
+                  <span>先在左侧提交第一条家长或学生反馈。</span>
                 </div>
               )}
+            </div>
+          </div>
+        </section>
+
+        <section className="section soft-section">
+          <div className="container">
+            <SectionTitle eyebrow="提交建议" title="写出更像招生案例的反馈" description="建议直接写变化结果、学习场景和家长感受，内容会更有说服力。" />
+            <div className="feedback-tip-grid">
+              {[
+                ['写变化', '比如“孩子开始主动开口读句子了”'],
+                ['写场景', '比如“每天晚上会自己跟读 10 分钟”'],
+                ['写结果', '比如“最近单词听写正确率明显提高”'],
+              ].map(([title, text]) => (
+                <article className="feedback-tip-card" key={title}>
+                  <Sparkles size={18} />
+                  <strong>{title}</strong>
+                  <p>{text}</p>
+                </article>
+              ))}
             </div>
           </div>
         </section>

@@ -42,6 +42,7 @@ npm run build
 - 推荐开启：`Always Use HTTPS`、`Auto Minify`、`Brotli`
 - 静态缓存：`public/_headers` 已配置 HTML 与静态资源缓存策略
 - SPA 路由：`public/_redirects` 已配置回退到 `index.html`
+- 反馈提交：`/feedback` 会优先调用 `/api/feedback`，要启用真正云端保存请在 Pages 里绑定 `FEEDBACK_DB` 到 Cloudflare D1
 
 ## 页面入口
 - 官网首页：`/`

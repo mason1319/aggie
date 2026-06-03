@@ -10,6 +10,7 @@ import { SectionTitle } from '../components/SectionTitle'
 import { WechatModal } from '../components/WechatModal'
 import { courses } from '../data/courses'
 import { getAdmissionSettings, getFeedbackLibrary, getInstitutionProfile, getMediaAsset } from '../lib/storage'
+import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries } from '../lib/feedbackApi'
 import type { AdmissionCampaign, AdmissionSettings, InstitutionProfile, MediaAsset } from '../types'
 
 const methods = [
@@ -38,6 +39,7 @@ export function HomePage() {
   const [settings, setSettings] = useState<AdmissionSettings>(() => getAdmissionSettings())
   const [institution, setInstitution] = useState<InstitutionProfile>(() => getInstitutionProfile())
   const [feedbackEntries, setFeedbackEntries] = useState(() => getFeedbackLibrary().entries.slice(0, 3))
+  const [feedbackSource, setFeedbackSource] = useState<'cloud' | 'cache' | 'offline'>('cache')
 
   useEffect(() => {
     const refresh = () => {
@@ -45,9 +47,17 @@ export function HomePage() {
       setInstitution(getInstitutionProfile())
       setFeedbackEntries(getFeedbackLibrary().entries.slice(0, 3))
     }
+    const syncFeedback = async () => {
+      const result = await loadFeedbackEntries()
+      setFeedbackEntries(result.entries.slice(0, 3))
+      setFeedbackSource(result.source)
+    }
+    void syncFeedback()
+    const interval = window.setInterval(() => { void syncFeedback() }, FEEDBACK_SYNC_INTERVAL_MS)
     window.addEventListener('storage', refresh)
     window.addEventListener('aggie-storage-change', refresh)
     return () => {
+      window.clearInterval(interval)
       window.removeEventListener('storage', refresh)
       window.removeEventListener('aggie-storage-change', refresh)
     }
@@ -234,7 +244,7 @@ export function HomePage() {
             <div className="section-inline-head">
               <div>
                 <h3>家长与学生反馈</h3>
-                <p>真实反馈可在独立页面上传并展示，支持图片和头像。</p>
+                <p>真实反馈可在独立页面上传并展示，支持图片和头像。当前同步状态：{feedbackSource === 'cloud' ? '云端已同步' : feedbackSource === 'cache' ? '本机缓存' : '离线缓存'}</p>
               </div>
               <Link to="/feedback" className="text-link">打开反馈上传页 <ArrowRight size={17} /></Link>
             </div>
