@@ -27,9 +27,18 @@ export interface HonorGalleryItem {
 const API_BASE = '/api'
 export const IMAGE_UPLOAD_CHUNK_SIZE = 1 * 1024 * 1024
 
-const IMAGE_INIT_ENDPOINT = `${API_BASE}/media-image-upload-init`
-const IMAGE_CHUNK_ENDPOINT = `${API_BASE}/media-image-upload-chunk`
-const IMAGE_COMPLETE_ENDPOINT = `${API_BASE}/media-image-upload-complete`
+const IMAGE_INIT_ENDPOINTS = [
+  `${API_BASE}/media-image-upload-init`,
+  `${API_BASE}/media-upload-image-init`,
+]
+const IMAGE_CHUNK_ENDPOINTS = [
+  `${API_BASE}/media-image-upload-chunk`,
+  `${API_BASE}/media-upload-image-chunk`,
+]
+const IMAGE_COMPLETE_ENDPOINTS = [
+  `${API_BASE}/media-image-upload-complete`,
+  `${API_BASE}/media-upload-image-complete`,
+]
 const HONOR_DATA_ENDPOINTS = [
   `${API_BASE}/honor.json`,
   `${API_BASE}/honor`,
@@ -75,6 +84,27 @@ async function requestJson<T>(init: RequestInit, endpoint: string): Promise<T> {
   } catch (error) {
     throw new Error(normalizeErrorText(error, '图片上传失败，请稍后再试。'))
   }
+}
+
+async function requestJsonWithFallback<T>(
+  init: RequestInit,
+  endpoints: string[],
+): Promise<T> {
+  if (!Array.isArray(endpoints) || endpoints.length === 0) {
+    throw new Error('请求地址不存在')
+  }
+
+  for (const endpoint of endpoints) {
+    try {
+      return await requestJson<T>(init, endpoint)
+    } catch (error) {
+      if (endpoints[endpoints.length - 1] === endpoint) {
+        throw error
+      }
+    }
+  }
+
+  throw new Error('上传服务不可用')
 }
 
 interface ContentBundle {
@@ -221,11 +251,11 @@ export async function uploadImageToLocalServer({
     desc: desc || '图片上传',
   }
 
-  const initResult = await requestJson<ImageUploadInitResponse>({
+  const initResult = await requestJsonWithFallback<ImageUploadInitResponse>({
     method: 'POST',
     headers: { 'Content-Type': 'application/json;charset=utf-8' },
     body: JSON.stringify(initPayload),
-  }, IMAGE_INIT_ENDPOINT)
+  }, IMAGE_INIT_ENDPOINTS)
 
   const uploadId = initResult.uploadId
   let uploaded = 0
@@ -239,10 +269,10 @@ export async function uploadImageToLocalServer({
     formData.append('chunkIndex', String(chunkIndex))
     formData.append('file', chunk)
 
-    await requestJson<UploadChunkResponse>({
+    await requestJsonWithFallback<UploadChunkResponse>({
       method: 'POST',
       body: formData,
-    }, IMAGE_CHUNK_ENDPOINT)
+    }, IMAGE_CHUNK_ENDPOINTS)
 
     uploaded += chunk.size
     if (onProgress) {
@@ -250,7 +280,7 @@ export async function uploadImageToLocalServer({
     }
   }
 
-  const complete = await requestJson<ImageUploadResult>({
+  const complete = await requestJsonWithFallback<ImageUploadResult>({
     method: 'POST',
     headers: { 'Content-Type': 'application/json;charset=utf-8' },
     body: JSON.stringify({
@@ -258,7 +288,7 @@ export async function uploadImageToLocalServer({
       title: title || file.name,
       desc: desc || '图片上传',
     }),
-  }, IMAGE_COMPLETE_ENDPOINT)
+  }, IMAGE_COMPLETE_ENDPOINTS)
 
   return complete
 }
