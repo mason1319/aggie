@@ -44,9 +44,9 @@ const VIDEO_ALLOWED_TYPES = ['video/mp4']
 const VIDEO_UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024
 const MEDIA_UPLOAD_LOCAL_BASE = '/api'
 const MEDIA_UPLOAD_PATH = {
-  init: '/media/upload/init',
-  chunk: '/media/upload/chunk',
-  complete: '/media/upload/complete',
+  init: '/media-upload-init',
+  chunk: '/media-upload-chunk',
+  complete: '/media-upload-complete',
 }
 const MEDIA_UPLOAD_REMOTE_BASE = (import.meta.env.VITE_AGGIE_MEDIA_UPLOAD_BASE || '').trim().replace(/\/+$/, '')
 const MEDIA_UPLOAD_REMOTE_TOKEN = (import.meta.env.VITE_AGGIE_MEDIA_UPLOAD_TOKEN || '').trim()
