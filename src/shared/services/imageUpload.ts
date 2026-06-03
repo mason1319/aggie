@@ -30,7 +30,11 @@ export const IMAGE_UPLOAD_CHUNK_SIZE = 1 * 1024 * 1024
 const IMAGE_INIT_ENDPOINT = `${API_BASE}/media-image-upload-init`
 const IMAGE_CHUNK_ENDPOINT = `${API_BASE}/media-image-upload-chunk`
 const IMAGE_COMPLETE_ENDPOINT = `${API_BASE}/media-image-upload-complete`
-const HONOR_DATA_ENDPOINT = `${API_BASE}/honor.json`
+const HONOR_DATA_ENDPOINTS = [
+  `${API_BASE}/honor.json`,
+  `${API_BASE}/honor`,
+]
+const CONTENT_ENDPOINT = `${API_BASE}/content`
 
 function normalizeErrorText(error: unknown, fallback: string) {
   if (error instanceof TypeError) {
@@ -73,31 +77,56 @@ async function requestJson<T>(init: RequestInit, endpoint: string): Promise<T> {
   }
 }
 
-export async function loadHonorGallery(): Promise<HonorGalleryItem[]> {
-  const response = await requestJson<unknown>(
-    {
-      headers: {
-        Accept: 'application/json',
-      },
-    },
-    HONOR_DATA_ENDPOINT,
-  )
-
-  if (!Array.isArray(response)) {
-    return []
+interface ContentBundle {
+  bundle?: {
+    media?: {
+      assets?: unknown[]
+    }
   }
+  media?: {
+    assets?: unknown[]
+  }
+}
 
-  const toString = (value: unknown) => (typeof value === 'string' ? value : '')
-  const toHonors = (item: Record<string, unknown>): HonorGalleryItem => ({
-    id: toString(item.id) || String(Date.now() + Math.random()),
-    name: toString(item.name) || 'honor-image',
-    url: toString(item.url),
-    title: toString(item.title) || '荣誉照片',
-    desc: toString(item.desc) || '荣誉墙照片',
-    uploadedAt: toString(item.uploadedAt) || new Date().toISOString(),
-  })
+function isHonorImageAsset(asset: unknown) {
+  if (!asset || typeof asset !== 'object') {
+    return false
+  }
+  const value = asset as Record<string, unknown>
+  if (value.kind !== 'image') {
+    return false
+  }
+  const url = typeof value.remoteUrl === 'string'
+    ? value.remoteUrl
+    : typeof value.dataUrl === 'string'
+      ? value.dataUrl
+      : ''
+  if (!url) {
+    return false
+  }
+  return url.includes('/media/honorImg/') || url.includes('media/honorImg')
+}
 
-  return response
+function normalizeHonorAsset(asset: Record<string, unknown>): HonorGalleryItem {
+  return {
+    id: typeof asset.id === 'string' ? asset.id : `honor-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+    name: typeof asset.name === 'string' ? asset.name : 'honor-image',
+    url: typeof asset.url === 'string' ? asset.url : (typeof asset.remoteUrl === 'string' ? asset.remoteUrl : ''),
+    title: typeof asset.title === 'string' ? asset.title : '荣誉照片',
+    desc: typeof asset.desc === 'string' ? asset.desc : '荣誉墙照片',
+    uploadedAt: typeof asset.uploadedAt === 'string' && asset.uploadedAt.trim()
+      ? asset.uploadedAt
+      : typeof asset.createdAt === 'string' && asset.createdAt.trim()
+        ? asset.createdAt
+        : new Date().toISOString(),
+  }
+}
+
+function toHonorGallery(payload: unknown): HonorGalleryItem[] {
+  if (!Array.isArray(payload)) {
+    throw new Error('荣誉接口返回格式不符合预期')
+  }
+  return payload
     .map((item) => item as Record<string, unknown>)
     .filter((item): item is Record<string, unknown> => {
       if (!item || typeof item !== 'object') {
@@ -109,7 +138,59 @@ export async function loadHonorGallery(): Promise<HonorGalleryItem[]> {
         && typeof item.name === 'string'
       )
     })
-    .map(toHonors)
+    .map(normalizeHonorAsset)
+    .sort((a, b) => Date.parse(b.uploadedAt) - Date.parse(a.uploadedAt))
+}
+
+function toHonorGalleryFromContent(payload: unknown): HonorGalleryItem[] {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('内容接口返回格式不符合预期')
+  }
+
+  const record = payload as ContentBundle
+  const root = record.bundle as unknown
+  const container = root && typeof root === 'object' ? root as ContentBundle : record
+  const assets = container.media?.assets || []
+  if (!Array.isArray(assets)) {
+    return []
+  }
+
+  return assets
+    .filter(isHonorImageAsset)
+    .map((item) => normalizeHonorAsset(item as Record<string, unknown>))
+    .sort((a, b) => Date.parse(b.uploadedAt) - Date.parse(a.uploadedAt))
+}
+
+async function requestHonorFromEndpoint(endpoint: string): Promise<HonorGalleryItem[]> {
+  const response = await requestJson<unknown>({}, endpoint)
+  return toHonorGallery(response)
+}
+
+async function requestHonorFromContent(): Promise<HonorGalleryItem[]> {
+  const response = await requestJson<unknown>({}, CONTENT_ENDPOINT)
+  return toHonorGalleryFromContent(response)
+}
+
+export async function loadHonorGallery(): Promise<HonorGalleryItem[]> {
+  const errors: Error[] = []
+  for (const endpoint of HONOR_DATA_ENDPOINTS) {
+    try {
+      return await requestHonorFromEndpoint(endpoint)
+    } catch (error) {
+      if (error instanceof Error) {
+        errors.push(error)
+      } else {
+        errors.push(new Error('荣誉接口读取异常'))
+      }
+    }
+  }
+
+  try {
+    return await requestHonorFromContent()
+  } catch (error) {
+    errors.push(error instanceof Error ? error : new Error('内容接口读取异常'))
+    return []
+  }
 }
 
 interface UploadImageInput {

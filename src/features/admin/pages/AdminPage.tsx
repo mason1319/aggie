@@ -777,14 +777,27 @@ export function AdminPage() {
               setHonorUploadPercent(Math.min(100, Math.round(globalProgress)))
             },
           })
+          const honorAssetId = createMediaId('honor-photo')
+          upsertMediaAsset({
+            id: honorAssetId,
+            kind: 'image',
+            name: file.name,
+            title: file.name,
+            desc: '荣誉墙照片',
+            mimeType: file.type || 'image/jpeg',
+            dataUrl: '',
+            remoteUrl: result.imageUrl,
+            createdAt: new Date().toISOString(),
+          })
           setHonorGallery((current) => [...current, {
-            id: createMediaId('honor-photo'),
+            id: honorAssetId,
             name: file.name,
             url: result.imageUrl,
             title: file.name,
             desc: '荣誉墙照片',
             uploadedAt: new Date().toISOString(),
           }])
+          setSaved(false)
         } catch (error) {
           nextErrors.push(`${file.name}：${error instanceof Error ? error.message : '上传失败，请稍后重试。'}`)
         }
@@ -806,6 +819,7 @@ export function AdminPage() {
 
   const removeHonorPhoto = (assetId: string) => {
     setHonorGallery((current) => current.filter((item) => item.id !== assetId))
+    removeMediaAsset(assetId)
   }
 
 
