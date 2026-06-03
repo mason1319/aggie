@@ -12,9 +12,15 @@ import { CAMPUS_ANCHORS, ROUTE, ROUTES } from '../../../shared/constants/routes'
 import { useContentBundle } from '../../../shared/data-source'
 import { getMediaAsset } from '../../../shared/services/storage'
 import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries } from '../../../shared/services/feedbackApi'
+import { loadHonorGallery, type HonorGalleryItem } from '../../../shared/services/imageUpload'
 import type { AdmissionCampaign } from '../../../shared/types/admission'
 import type { FeedbackEntry } from '../../../shared/types/feedback'
 import type { MediaAsset } from '../../../shared/types/media'
+import videoCatalog from '../../../data/video.json'
+import {
+  resolvePlayableVideoSource,
+  resolvePlayableVideoSources,
+} from '../../../shared/media/videoSource'
 
 const methods = [
   { icon: Image, title: '图片联想记忆', text: '把抽象单词变成生动画面，理解以后更容易记住。', color: 'mint' },
@@ -30,6 +36,140 @@ const featureCards = [
   { icon: Star, title: '单词消消乐', text: '游戏化，趣味学' },
 ]
 
+type VideoMeta = {
+  videoSrc: string
+  title: string
+  desc: string
+}
+type VideoCardMeta = {
+  videoSources: string[]
+  title: string
+  desc: string
+}
+
+const customVideoCatalog = videoCatalog as VideoMeta[]
+const VIDEO_TITLE_FALLBACK = '机构视频'
+const VIDEO_DESC_FALLBACK = '课堂活动与学习内容展示。'
+
+function normalizeVideoSourceForCompare(videoSrc: string) {
+  const source = videoSrc.trim()
+  if (!source) {
+    return ''
+  }
+
+  if (source.startsWith('/api/media-download?')) {
+    const queryStart = source.indexOf('?')
+    if (queryStart >= 0) {
+      const params = new URLSearchParams(source.slice(queryStart + 1))
+      const key = params.get('key')
+      if (key) {
+        return `/${key}`
+      }
+    }
+  }
+
+  return source
+}
+
+function isLikelyHashedName(value: string) {
+  const normalized = value.replace(/\.[^/.]+$/, '').trim()
+  if (!normalized) {
+    return false
+  }
+  const compact = normalized.replace(/[^a-zA-Z0-9]/g, '')
+  return /^[0-9a-f]{16,}$/i.test(compact)
+}
+
+function getVideoMeta(video: MediaAsset) {
+  const sourceList = [video.remoteUrl, video.dataUrl]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item))
+  if (sourceList.length === 0) {
+    return null
+  }
+
+  const sources = sourceList.flatMap((source) => resolvePlayableVideoSources(source))
+  const dedupedSources = Array.from(new Set(sources))
+  if (dedupedSources.length === 0) {
+    return null
+  }
+
+  const catalogMatchedSource = sourceList.find((source) => customVideoCatalog.some((item) => item.videoSrc === source))
+  const matched = catalogMatchedSource ? customVideoCatalog.find((item) => item.videoSrc === catalogMatchedSource) : undefined
+  if (!matched) {
+    const originTitle = (video.title || '').trim() || video.name.replace(/\.[^/.]+$/, '').trim()
+    const fallbackTitle = !originTitle || isLikelyHashedName(originTitle) ? VIDEO_TITLE_FALLBACK : originTitle
+    return {
+      videoSources: dedupedSources,
+      title: fallbackTitle,
+      desc: (video.desc || '').trim() || VIDEO_DESC_FALLBACK,
+    }
+  }
+  return {
+    videoSources: dedupedSources,
+    title: matched.title,
+    desc: matched.desc,
+  }
+}
+
+function normalizeCatalogCards() {
+  return customVideoCatalog
+    .map((item) => {
+      const videoSrc = resolvePlayableVideoSource(item.videoSrc)
+      const title = item.title?.trim()
+      const desc = item.desc?.trim()
+      if (!videoSrc || !title || !desc) {
+        return null
+      }
+      return {
+        videoSrc,
+        title,
+        desc,
+      }
+    })
+    .filter((item): item is {
+      videoSrc: string
+      title: string
+      desc: string
+    } => item !== null)
+}
+
+function PromoVideoPlayer({ sources, title }: { sources: string[], title: string }) {
+  const playableSources = useMemo(() => sources.filter((item, index, arr) => arr.indexOf(item) === index), [sources.join('|')])
+  const [sourceIndex, setSourceIndex] = useState(0)
+  const [exhausted, setExhausted] = useState(false)
+
+  useEffect(() => {
+    setSourceIndex(0)
+    setExhausted(false)
+  }, [sources.join('|')])
+
+  const handleError = () => {
+    setSourceIndex((current) => {
+      const next = current + 1
+      if (next >= playableSources.length) {
+        setExhausted(true)
+        return current
+      }
+      return next
+    })
+  }
+
+  if (playableSources.length === 0 || exhausted) {
+    return <div className="promo-video-empty">视频资源暂不可用</div>
+  }
+
+  return (
+    <video
+      controls
+      playsInline
+      src={playableSources[sourceIndex]}
+      title={title}
+      onError={handleError}
+    />
+  )
+}
+
 function CampaignIcon({ campaign }: { campaign: AdmissionCampaign }) {
   if (campaign.icon === 'sprout') return <Sprout />
   if (campaign.icon === 'leaf') return <Leaf />
@@ -42,6 +182,9 @@ export function HomePage() {
   const { bundle } = useContentBundle()
   const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>(() => bundle.feedback.entries.slice(0, 3))
   const [feedbackSource, setFeedbackSource] = useState<'cloud' | 'cache' | 'offline'>('cache')
+  const [honorPhotos, setHonorPhotos] = useState<HonorGalleryItem[]>([])
+  const [honorPhotosBusy, setHonorPhotosBusy] = useState(false)
+  const [honorPhotosError, setHonorPhotosError] = useState('')
   const { admission: settings, institution, courses } = bundle
 
   useEffect(() => {
@@ -50,7 +193,20 @@ export function HomePage() {
       setFeedbackEntries(result.entries.slice(0, 3))
       setFeedbackSource(result.source)
     }
+    const syncHonors = async () => {
+      try {
+        setHonorPhotosBusy(true)
+        setHonorPhotosError('')
+        const list = await loadHonorGallery()
+        setHonorPhotos(list)
+      } catch {
+        setHonorPhotosError('荣誉图片加载失败，请稍后重试。')
+      } finally {
+        setHonorPhotosBusy(false)
+      }
+    }
     void syncFeedback()
+    void syncHonors()
     const interval = window.setInterval(() => { void syncFeedback() }, FEEDBACK_SYNC_INTERVAL_MS)
     return () => {
       window.clearInterval(interval)
@@ -64,10 +220,52 @@ export function HomePage() {
   const promoVideos = useMemo(
     () => institution.promoVideoAssetIds
       .map((assetId) => getMediaAsset(assetId))
-      .filter((asset): asset is MediaAsset => asset !== undefined && asset.kind === 'video'),
+      .filter((asset): asset is MediaAsset => {
+        if (asset === undefined || asset.kind !== 'video') {
+          return false
+        }
+        return Boolean((asset.remoteUrl && asset.remoteUrl.length > 0) || (asset.dataUrl && asset.dataUrl.length > 0))
+      }),
     [institution.promoVideoAssetIds],
   )
-
+  const promoVideoCards = useMemo(
+    () => {
+      const baseCards = promoVideos
+        .map((video) => getVideoMeta(video))
+        .filter((item): item is {
+          videoSources: string[]
+          title: string
+          desc: string
+        } => item !== null)
+      const catalogCards = normalizeCatalogCards()
+      const seen = new Set(baseCards.map((item) => normalizeVideoSourceForCompare(item.videoSources[0])))
+      const fallbackCards = catalogCards.filter((item) => {
+        const normalized = normalizeVideoSourceForCompare(item.videoSrc)
+        if (!normalized || seen.has(normalized)) {
+          return false
+        }
+        seen.add(normalized)
+        return true
+      })
+      const normalizedFallbackCards = fallbackCards.map((item) => {
+        const videoSources = resolvePlayableVideoSources(item.videoSrc)
+        if (videoSources.length === 0) {
+          return null
+        }
+        return {
+          videoSources,
+          title: item.title,
+          desc: item.desc,
+        }
+      }).filter((item): item is {
+        videoSources: string[]
+        title: string
+        desc: string
+      } => item !== null)
+      return [...baseCards, ...normalizedFallbackCards]
+    },
+    [promoVideos],
+  )
   const openContact = (title = '添加老师微信') => {
     setModalTitle(title)
     setModalOpen(true)
@@ -218,13 +416,13 @@ export function HomePage() {
         <section className="section soft-section">
           <div className="container">
             <SectionTitle eyebrow="机构视频" title="上传你自己的宣传视频与课堂片段" description="后台支持批量上传，首页自动展示多条视频素材。" />
-            <div className="promo-video-grid">
-              {promoVideos.length > 0 ? promoVideos.map((video) => (
-                <article className="promo-video-card" key={video.id}>
-                  <video controls playsInline src={video.dataUrl} />
+            <div className={`promo-video-grid ${promoVideoCards.length > 2 ? 'promo-video-grid-scrollable' : ''}`}>
+              {promoVideoCards.length > 0 ? promoVideoCards.map((video) => (
+                <article className="promo-video-card" key={video.videoSources[0]}>
+                  <PromoVideoPlayer sources={video.videoSources} title={video.title} />
                   <div className="promo-video-copy">
-                    <strong>{video.name}</strong>
-                    <span>来自后台上传的视频素材</span>
+                    <strong>{video.title}</strong>
+                    <span>{video.desc}</span>
                   </div>
                 </article>
               )) : (
@@ -234,6 +432,37 @@ export function HomePage() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="section soft-section">
+          <div className="container">
+            <div className="section-inline-head">
+              <SectionTitle eyebrow="荣誉墙" title="荣誉瞬间" description="可展示学生作品、证书、奖状与课堂成绩。" />
+              <Link to={ROUTES.honor} className="text-link">查看机构风采页 <ArrowRight size={17} /></Link>
+            </div>
+            <div className="honor-gallery-grid">
+              {honorPhotosBusy ? <div className="admin-upload-note">正在读取荣誉墙配置…</div> : null}
+              {honorPhotosError ? <div className="admin-upload-error">{honorPhotosError}</div> : null}
+              {honorPhotos.length > 0 ? honorPhotos.map((photo) => (
+                <article className="honor-photo-card" key={photo.id}>
+                  <img src={photo.url} alt={photo.name} />
+                  <div className="honor-photo-caption">
+                    <strong>{photo.title || photo.name}</strong>
+                  </div>
+                </article>
+              )) : (
+                <div className="promo-video-empty honor-photo-empty">
+                  <strong>还未上传荣誉照片</strong>
+                  <span>进入后台荣誉墙上传图片后，这里会自动展示。</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="section soft-section">
+          <div className="container">
             <div className="section-spacer" />
             <div className="section-inline-head">
               <div>

@@ -67,18 +67,31 @@
   - 变量名：`AGGIE_CONTENT_ADMIN_TOKEN`
   - 变量值：你自定义的密钥（与前端 `VITE_AGGIE_CONTENT_ADMIN_TOKEN` 保持一致）
 
-## 6. 远端内容 API
+## 6. 视频存储（R2）绑定（必须，/api/media-upload）
+### 6.1 创建 R2
+1. 进入 **Workers & Pages** → **R2** → **Create bucket**。
+2. 记录 bucket 名称与可绑定对象。
+
+### 6.2 绑定到 Pages
+1. 在项目 Settings → Functions → **Bindings** 新增：
+   - 类型：`R2 Bucket`
+   - Variable name：`AGGIE_MEDIA_BUCKET`
+   - 选择上一步的 bucket
+2. 可选：设置变量 `AGGIE_MEDIA_PUBLIC_BASE` 为公开访问前缀（如 `https://xxx.public.r2.dev/media/videos`）。不配置时会自动回退到 `/api/media-download?key=...`。
+3. 可选：如需上传鉴权，设置 `AGGIE_MEDIA_UPLOAD_TOKEN`（与前端 `VITE_AGGIE_MEDIA_UPLOAD_TOKEN` 一致）。
+
+## 7. 远端内容 API
 - `GET /api/content`：返回内容包
 - `PUT /api/content`：携带 `Authorization: Bearer <token>`（或 `X-Admin-Token`）时可写入
 - 本地模式请保留 `VITE_AGGIE_CONTENT_SOURCE=hybrid`，默认会优先取远端、失败后回退本地 `localStorage`，保证演示可用。
 
-## 7. 常用校验命令
+## 8. 常用校验命令
 ```bash
 npm run build
 npm run preview
 ```
 
-### 7.1 一键 API 联调脚本（推荐）
+### 8.1 一键 API 联调脚本（推荐）
 ```bash
 npm run verify:api
 ```
@@ -101,14 +114,16 @@ npm run dev -- --host 0.0.0.0 --port 4173
 npm run verify:api -- --base http://localhost:4173 --token <你的TOKEN>
 ```
 
-### 7.2 命令级验收预期
+### 8.2 命令级验收预期
 - `GET /api/content`：第一次绑定 KV 前可为 `404`，绑定 KV 后应返回 JSON；
 - `PUT /api/content`：携带正确 Token 时应返回 `200`；
 - `GET /api/content`（写后）：应返回 JSON 中可见 `bundle`；
 - `POST /api/feedback`：应返回 `entry.id`；
 - `GET /api/feedback`：应返回 `{ "entries": [...] }`。
+ - `POST /api/media-upload-init`（有测试文件时）：应返回 `200` 并包含 `uploadId`；
+ - `POST /api/media-download?key=media/videos/...`：已上传 key 应返回 `200/206`，播放器可正常播放。
 
-## 8. 后续（小程序 / APP）
+## 9. 后续（小程序 / APP）
 - 已建立统一内容契约 `AppContentBundle`，下一步只需新增对应端数据层适配器：
   - 读取 `https://aggieai.me/api/content`
   - 缓存 `meta.schemaVersion`

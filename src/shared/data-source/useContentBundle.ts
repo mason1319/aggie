@@ -32,21 +32,11 @@ export function useContentBundle(): UseContentBundleResult {
       if (!active) return
       setBundle(getContentSnapshot())
     }
-    const handleStorage = () => {
-      if (!active) return
-      void getContentBundle(true).then((next) => {
-        if (active) setBundle(next)
-      })
-    }
 
     window.addEventListener(CONTENT_SOURCE_EVENT, handleRefresh)
-    window.addEventListener('storage', handleStorage)
-    window.addEventListener('aggie-storage-change', handleStorage)
     return () => {
       active = false
       window.removeEventListener(CONTENT_SOURCE_EVENT, handleRefresh)
-      window.removeEventListener('storage', handleStorage)
-      window.removeEventListener('aggie-storage-change', handleStorage)
     }
   }, [])
 

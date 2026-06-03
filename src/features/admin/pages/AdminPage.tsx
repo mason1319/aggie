@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { courses } from '../../../shared/data/courses'
 import { getContentSnapshot, saveContentBundle, useContentBundle } from '../../../shared/data-source'
+import { loadHonorGallery, type HonorGalleryItem, uploadImageToLocalServer } from '../../../shared/services/imageUpload'
 import {
   getAdmissionSettings,
   getInstitutionProfile,
@@ -16,7 +17,6 @@ import {
   resetMediaState,
   resetInstitutionProfile,
   saveAdmissionSettings,
-  saveInstitutionProfile,
   removeMediaAsset,
   updateMediaBinding,
   upsertMediaAsset,
@@ -35,21 +35,27 @@ import type {
 } from '../../../shared/types/institution'
 import type { MediaAsset } from '../../../shared/types/media'
 import { ROUTES } from '../../../shared/constants/routes'
+import { resolvePlayableVideoSource } from '../../../shared/media/videoSource'
 
 const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || 'aggie2026'
 
 const AVATAR_MAX_SIZE_BYTES = 2 * 1024 * 1024
 const AVATAR_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const VIDEO_ALLOWED_TYPES = ['video/mp4']
+const HONOR_PHOTO_MAX_SIZE_BYTES = 8 * 1024 * 1024
+const HONOR_PHOTO_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const HONOR_PHOTO_ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
+const AUDIO_MAX_SIZE_BYTES = 16 * 1024 * 1024
+const AUDIO_ALLOWED_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/wave', 'audio/x-wav', 'audio/ogg', 'audio/aac', 'audio/webm', 'audio/m4a', 'audio/x-m4a']
+const AUDIO_ALLOWED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'ogg', 'aac', 'webm']
 const VIDEO_UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024
-const MEDIA_UPLOAD_LOCAL_BASE = '/api'
+const MEDIA_UPLOAD_API_BASE = '/api'
+type MediaUploadRoute = 'init' | 'chunk' | 'complete'
 const MEDIA_UPLOAD_PATH = {
   init: '/media-upload-init',
   chunk: '/media-upload-chunk',
   complete: '/media-upload-complete',
-}
-const MEDIA_UPLOAD_REMOTE_BASE = (import.meta.env.VITE_AGGIE_MEDIA_UPLOAD_BASE || '').trim().replace(/\/+$/, '')
-const MEDIA_UPLOAD_REMOTE_TOKEN = (import.meta.env.VITE_AGGIE_MEDIA_UPLOAD_TOKEN || '').trim()
+} as const
 const VIDEO_CATALOG_DEFAULT_DESC = '机构宣传素材（待补充）'
 const VIDEO_TITLE_FALLBACK = '机构视频'
 
@@ -58,7 +64,8 @@ function isLikelyHashedVideoName(value: string) {
   if (!normalized) {
     return false
   }
-  return /^[0-9a-f]{16,}$/i.test(normalized) || /^[0-9a-f]{8,}-[0-9a-f]{8,}$/i.test(normalized)
+  const compact = normalized.replace(/[^a-zA-Z0-9]/g, '')
+  return /^[0-9a-f]{16,}$/i.test(compact)
 }
 
 function getPromoVideoDisplayTitle(video: MediaAsset) {
@@ -67,12 +74,6 @@ function getPromoVideoDisplayTitle(video: MediaAsset) {
     return VIDEO_TITLE_FALLBACK
   }
   return raw
-}
-
-interface MediaUploadTarget {
-  key: 'local' | 'cf'
-  base: string
-  token?: string
 }
 
 interface VideoUploadInitResponse {
@@ -146,15 +147,6 @@ function updateArrayItem<T extends { id: string }>(
   return items.map((item) => (item.id === id ? updater(item) : item))
 }
 
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error('文件读取失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
 interface VideoInitPayload {
   fileName: string
   mimeType: string
@@ -173,101 +165,47 @@ interface VideoUploadResult {
   videoSrc: string
 }
 
-function buildMediaUploadEndpoint(base: string, path: keyof typeof MEDIA_UPLOAD_PATH) {
-  const normalizedBase = base.replace(/\/+$/, '')
-  const normalizedPath = MEDIA_UPLOAD_PATH[path]
-  return `${normalizedBase}${normalizedPath}`
+function mediaUploadEndpoint(path: MediaUploadRoute) {
+  return `${MEDIA_UPLOAD_API_BASE}${MEDIA_UPLOAD_PATH[path]}`
 }
 
-function getMediaUploadTargets(): MediaUploadTarget[] {
-  const targets: MediaUploadTarget[] = []
-  const remoteBase = MEDIA_UPLOAD_REMOTE_BASE
-  if (import.meta.env.DEV) {
-    targets.push({
-      key: 'local',
-      base: MEDIA_UPLOAD_LOCAL_BASE,
-    })
-  }
-  if (remoteBase) {
-    targets.push({
-      key: 'cf',
-      base: remoteBase,
-      token: MEDIA_UPLOAD_REMOTE_TOKEN || undefined,
-    })
-  } else if (import.meta.env.DEV) {
-    targets.push({ key: 'local', base: MEDIA_UPLOAD_LOCAL_BASE })
-  }
-  return targets
-}
-
-class MediaUploadError extends Error {
-  canFallback = false
-
-  constructor(message: string, canFallback = false) {
-    super(message)
-    this.canFallback = canFallback
-    this.name = 'MediaUploadError'
-  }
-}
-
-function mediaUploadHeaders(target: MediaUploadTarget): Record<string, string> {
-  return target.key === 'cf' && target.token ? { Authorization: `Bearer ${target.token}` } : {}
-}
-
-async function requestMediaUpload<T>(
-  target: MediaUploadTarget,
-  path: keyof typeof MEDIA_UPLOAD_PATH,
-  init: RequestInit,
-): Promise<T> {
-  const endpoint = buildMediaUploadEndpoint(target.base, path)
+async function requestMediaUpload<T>(path: MediaUploadRoute, init: RequestInit): Promise<T> {
+  const endpoint = mediaUploadEndpoint(path)
   try {
-    const requestHeaders = new Headers(init.headers ?? {})
-    const authHeaders = mediaUploadHeaders(target)
-    for (const key of Object.keys(authHeaders)) {
-      requestHeaders.set(key, authHeaders[key])
+    const response = await fetch(endpoint, init)
+    const responseText = await response.text()
+    let payload: unknown = null
+    try {
+      payload = JSON.parse(responseText)
+    } catch {
+      payload = responseText ? { raw: responseText } : null
     }
-  const response = await fetch(endpoint, {
-      ...init,
-      headers: requestHeaders,
-    })
-    const payload = await response.json().catch(() => null)
     if (!response.ok) {
       const detail = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
         ? payload.error
         : `请求失败 (${response.status})`
-      if (target.key === 'cf' && (response.status === 404 || response.status === 405)) {
-        throw new MediaUploadError(`云端上传接口暂不可用（${response.status}），将自动尝试本地通道。`, true)
-      }
-      if (target.key === 'local' && response.status === 404) {
-        throw new MediaUploadError(detail, true)
-      }
-      throw new Error(detail)
+      throw new Error(`${detail}（${endpoint}）`)
     }
     if (!payload || typeof payload !== 'object') {
-      throw new Error('服务端返回异常')
+      throw new Error(`服务端返回异常（${endpoint}）`)
     }
     return payload as T
   } catch (error) {
-    if (error instanceof MediaUploadError) {
+    if (error instanceof TypeError) {
+      throw new Error(`请求 ${endpoint} 失败（本机上传服务未就绪或被拦截）。请确认开发服务器已启动。`)
+    }
+    if (error instanceof Error) {
       throw error
     }
-    if (error instanceof TypeError) {
-      if (target.key === 'local') {
-        throw new MediaUploadError('本地服务未启用上传接口，请确认使用 npm run dev 启动本机服务，或改用外链上传。', true)
-      }
-      if (target.key === 'cf') {
-        throw new MediaUploadError('云端上传接口暂不可达，已尝试切换上传通道。', true)
-      }
-    }
-    throw error
+    throw new Error('上传请求失败，请稍后重试。')
   }
 }
 
 async function uploadVideoByTarget(
-  target: MediaUploadTarget,
   file: File,
   title: string,
   desc: string,
+  onProgress?: (percent: number) => void,
 ): Promise<VideoUploadResult> {
   const totalChunks = Math.max(1, Math.ceil(file.size / VIDEO_UPLOAD_CHUNK_SIZE))
   const initPayload: VideoInitPayload = {
@@ -278,7 +216,7 @@ async function uploadVideoByTarget(
     title,
     desc,
   }
-  const initResult = await requestMediaUpload<VideoUploadInitResponse>(target, 'init', {
+  const initResult = await requestMediaUpload<VideoUploadInitResponse>('init', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json;charset=utf-8' },
     body: JSON.stringify(initPayload),
@@ -289,6 +227,7 @@ async function uploadVideoByTarget(
   }
   const uploadId: string = initResult.uploadId
 
+  let uploadedBytes = 0
   for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
     const start = chunkIndex * VIDEO_UPLOAD_CHUNK_SIZE
     const end = Math.min(start + VIDEO_UPLOAD_CHUNK_SIZE, file.size)
@@ -298,16 +237,20 @@ async function uploadVideoByTarget(
     formData.append('chunkIndex', String(chunkIndex))
     formData.append('file', chunk, `chunk-${chunkIndex}`)
 
-    const chunkPayload = await requestMediaUpload<VideoUploadChunkResponse>(target, 'chunk', {
+    const chunkPayload = await requestMediaUpload<VideoUploadChunkResponse>('chunk', {
       method: 'POST',
       body: formData,
     })
     if (typeof chunkPayload.uploadId !== 'string') {
       throw new Error('上传服务返回分片状态异常')
     }
+    uploadedBytes += chunk.size
+    if (onProgress) {
+      onProgress(Math.min(100, Math.round((uploadedBytes / file.size) * 100)))
+    }
   }
 
-  const completePayload = await requestMediaUpload<VideoUploadResult>(target, 'complete', {
+  const completePayload = await requestMediaUpload<VideoUploadResult>('complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json;charset=utf-8' },
     body: JSON.stringify({ uploadId, title, desc }),
@@ -322,7 +265,7 @@ async function uploadVideoByTarget(
 
 function buildVideoMetaTitle(fileName: string, userTitle: string, fallbackIndex: number) {
   const trimTitle = userTitle.trim()
-  const baseTitle = trimTitle || fileName.replace(/\.[^/.]+$/, '').trim() || '机构视频'
+  const baseTitle = trimTitle || VIDEO_TITLE_FALLBACK
   if (fallbackIndex <= 1) {
     return baseTitle
   }
@@ -343,36 +286,9 @@ async function uploadVideoToLocalServer(
   file: File,
   title: string,
   desc: string,
+  onProgress?: (percent: number) => void,
 ): Promise<VideoUploadResult> {
-  const targets = getMediaUploadTargets()
-  let lastLocalError = ''
-  let lastRemoteError = ''
-  for (const target of targets) {
-    try {
-      return await uploadVideoByTarget(target, file, title, desc)
-    } catch (error) {
-      if (error instanceof MediaUploadError && error.canFallback) {
-        if (target.key === 'local') {
-        lastLocalError = error.message
-        continue
-        }
-        if (target.key === 'cf') {
-          lastRemoteError = error.message
-          continue
-        }
-      }
-      if (error instanceof Error) {
-        if (target.key === 'cf') {
-          lastRemoteError = error.message
-        } else {
-          throw error
-        }
-      } else if (target.key === 'local') {
-        throw new Error('上传服务异常，请稍后重试。')
-      }
-    }
-  }
-  throw new Error(lastRemoteError || lastLocalError || '视频上传服务暂时不可用，请稍后重试。')
+  return uploadVideoByTarget(file, title, desc, onProgress)
 }
 
 function readImageSize(file: File) {
@@ -420,6 +336,30 @@ function validateVideoFile(file: File) {
   return ''
 }
 
+function validateHonorPhotoFile(file: File) {
+  const fileType = file.type.toLowerCase()
+  const fileExt = file.name.split('.').pop()?.toLowerCase()
+  if (!HONOR_PHOTO_ALLOWED_TYPES.includes(fileType) && !(fileExt && HONOR_PHOTO_ALLOWED_EXTENSIONS.includes(fileExt))) {
+    return '图片格式需为 JPG / PNG / WEBP。'
+  }
+  if (file.size > HONOR_PHOTO_MAX_SIZE_BYTES) {
+    return '图片大小不能超过8MB。'
+  }
+  return ''
+}
+
+function validateAudioFile(file: File) {
+  const fileType = file.type.toLowerCase()
+  const fileExt = file.name.split('.').pop()?.toLowerCase()
+  if (!AUDIO_ALLOWED_TYPES.includes(fileType) && !(fileExt && AUDIO_ALLOWED_EXTENSIONS.includes(fileExt))) {
+    return '音频格式不支持，请上传 MP3 / WAV / M4A / OGG。'
+  }
+  if (file.size > AUDIO_MAX_SIZE_BYTES) {
+    return '音频大小不能超过16MB。'
+  }
+  return ''
+}
+
 function createMediaId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -439,10 +379,39 @@ export function AdminPage() {
   const [saved, setSaved] = useState(false)
   const [teacherAvatarErrors, setTeacherAvatarErrors] = useState<Record<string, string>>({})
   const [videoUploadErrors, setVideoUploadErrors] = useState<string[]>([])
+  const [videoUploadBusy, setVideoUploadBusy] = useState(false)
+  const [videoUploadMessage, setVideoUploadMessage] = useState('')
+  const [videoUploadPercent, setVideoUploadPercent] = useState(0)
   const [remoteVideoUrl, setRemoteVideoUrl] = useState('')
   const [remoteVideoTitle, setRemoteVideoTitle] = useState('')
   const [videoNameKeyword, setVideoNameKeyword] = useState('')
   const [removeOldCount, setRemoveOldCount] = useState('1')
+  const [honorUploadBusy, setHonorUploadBusy] = useState(false)
+  const [honorUploadErrors, setHonorUploadErrors] = useState<string[]>([])
+  const [honorUploadMessage, setHonorUploadMessage] = useState('')
+  const [honorUploadPercent, setHonorUploadPercent] = useState(0)
+  const [honorGallery, setHonorGallery] = useState<HonorGalleryItem[]>([])
+  const [honorGalleryBusy, setHonorGalleryBusy] = useState(false)
+  const [honorGalleryError, setHonorGalleryError] = useState('')
+  const [teacherUploadProgress, setTeacherUploadProgress] = useState<Record<string, number>>({})
+  const honorPhotos = honorGallery.map((item) => ({
+    ...item,
+    remoteUrl: item.url,
+    dataUrl: item.url,
+  }))
+
+  const refreshHonorGallery = async () => {
+    setHonorGalleryBusy(true)
+    setHonorGalleryError('')
+    try {
+      const list = await loadHonorGallery()
+      setHonorGallery(list)
+    } catch {
+      setHonorGalleryError('荣誉墙图库读取失败，请稍后刷新重试。')
+    } finally {
+      setHonorGalleryBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (hydrated) return
@@ -468,7 +437,20 @@ export function AdminPage() {
   const selectedSentenceAudio = getMediaAsset(selectedBinding.sentenceAudioAssetId)
   const promoVideos = institution.promoVideoAssetIds
     .map((assetId) => getMediaAsset(assetId))
-    .filter((asset): asset is MediaAsset => asset !== undefined && asset.kind === 'video')
+    .filter((asset): asset is MediaAsset => {
+      if (asset === undefined || asset.kind !== 'video') {
+        return false
+      }
+      const playableSrc = resolvePlayableVideoSource(asset.remoteUrl || asset.dataUrl || '')
+      return Boolean(playableSrc)
+    })
+
+  useEffect(() => {
+    if (!authenticated) {
+      return
+    }
+    void refreshHonorGallery()
+  }, [authenticated])
 
   const removeAllPromoVideos = () => {
     if (!window.confirm('确认清空全部机构视频？此操作会删除当前配置中的机构视频记录。')) {
@@ -643,12 +625,30 @@ export function AdminPage() {
     }))
   }
 
-  const setInstitutionAndPersist = (updater: (current: InstitutionProfile) => InstitutionProfile) => {
+  const setInstitutionAndPersist = (
+    updater: (current: InstitutionProfile) => InstitutionProfile,
+    onPersistError?: (error: string) => void,
+  ) => {
     setSaved(false)
+    let nextInstitution = undefined as InstitutionProfile | undefined
     setInstitution((current) => {
-      const nextInstitution = updater(current)
-      saveInstitutionProfile(nextInstitution)
-      return nextInstitution
+      const next = updater(current)
+      nextInstitution = next
+      return next
+    })
+    if (!nextInstitution) {
+      return Promise.resolve()
+    }
+    const snapshot = getContentSnapshot()
+    return saveContentBundle({
+      ...snapshot,
+      institution: nextInstitution,
+    }).catch((error: unknown) => {
+      const message = normalizeErrorMessage(error)
+      if (onPersistError) {
+        onPersistError(message)
+      }
+      throw new Error(message)
     })
   }
 
@@ -673,29 +673,43 @@ export function AdminPage() {
       setTeacherAvatarErrors((current) => ({ ...current, [id]: '图片读取失败，请重新选择文件。' }))
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
+    try {
+      setTeacherUploadProgress((current) => ({ ...current, [id]: 0 }))
+      const result = await uploadImageToLocalServer({
+        category: 'teacher',
+        file,
+        title: file.name,
+        desc: '师资头像',
+        onProgress: (percent) => {
+          setTeacherUploadProgress((current) => ({ ...current, [id]: percent }))
+        },
+      })
       setSaved(false)
+      setInstitution((current) => ({
+        ...current,
+        teachers: updateArrayItem(current.teachers, id, (teacher) => ({ ...teacher, avatarUrl: result.imageUrl })),
+      }))
       setTeacherAvatarErrors((current) => {
         const next = { ...current }
         delete next[id]
         return next
       })
-      setInstitution((current) => ({
-        ...current,
-        teachers: updateArrayItem(current.teachers, id, (teacher) => ({ ...teacher, avatarUrl: String(reader.result) })),
-      }))
+    } catch {
+      setTeacherAvatarErrors((current) => ({ ...current, [id]: '头像上传失败，请重试。' }))
+    } finally {
+      setTeacherUploadProgress((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
     }
-    reader.onerror = () => {
-      setTeacherAvatarErrors((current) => ({ ...current, [id]: '头像读取失败，请重试。' }))
-    }
-    reader.readAsDataURL(file)
   }
 
   const uploadPromoVideo = async (
     file: File | undefined,
     titleInput = '',
     index = 1,
+    onProgress?: (percent: number) => void,
   ): Promise<string | undefined> => {
     if (!file) return '未选择文件。'
     const typeError = validateVideoFile(file)
@@ -703,7 +717,7 @@ export function AdminPage() {
     const resolvedTitle = buildVideoMetaTitle(file.name, titleInput, index)
     const resolvedDesc = `${VIDEO_CATALOG_DEFAULT_DESC}：${resolvedTitle}`
     try {
-      const { videoSrc } = await uploadVideoToLocalServer(file, resolvedTitle, resolvedDesc)
+      const { videoSrc } = await uploadVideoToLocalServer(file, resolvedTitle, resolvedDesc, onProgress)
       const asset: MediaAsset = {
         id: createMediaId('video'),
         kind: 'video',
@@ -720,6 +734,7 @@ export function AdminPage() {
         ...current,
         promoVideoAssetIds: Array.from(new Set([...current.promoVideoAssetIds, asset.id])),
       }))
+      setVideoUploadMessage(`已上传：${resolvedTitle}`)
       return
     } catch (error) {
       if (error instanceof Error) {
@@ -727,6 +742,70 @@ export function AdminPage() {
       }
       return '上传服务异常，请稍后重试。'
     }
+  }
+
+  const uploadHonorPhotos = async (files: File[]) => {
+    if (files.length === 0) return
+    const totalFiles = files.length
+    setHonorUploadBusy(true)
+    setHonorUploadErrors([])
+    setHonorUploadMessage('')
+    setHonorUploadPercent(0)
+
+    const nextErrors: string[] = []
+    try {
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        const typeError = validateHonorPhotoFile(file)
+        if (typeError) {
+          nextErrors.push(`${file.name}：${typeError}`)
+          setHonorUploadPercent(0)
+          continue
+        }
+
+        setHonorUploadMessage(`上传中 ${i + 1}/${files.length}：${file.name}`)
+
+        try {
+          const result = await uploadImageToLocalServer({
+            category: 'honor',
+            file,
+            title: file.name,
+            desc: '荣誉墙照片',
+            onProgress: (percent) => {
+              const globalBase = (i / totalFiles) * 100
+              const globalProgress = globalBase + (percent / totalFiles)
+              setHonorUploadPercent(Math.min(100, Math.round(globalProgress)))
+            },
+          })
+          setHonorGallery((current) => [...current, {
+            id: createMediaId('honor-photo'),
+            name: file.name,
+            url: result.imageUrl,
+            title: file.name,
+            desc: '荣誉墙照片',
+            uploadedAt: new Date().toISOString(),
+          }])
+        } catch (error) {
+          nextErrors.push(`${file.name}：${error instanceof Error ? error.message : '上传失败，请稍后重试。'}`)
+        }
+      }
+    } finally {
+      setHonorUploadBusy(false)
+      setHonorUploadPercent(0)
+      if (nextErrors.length > 0) {
+        setHonorUploadErrors(nextErrors)
+      } else {
+        setHonorUploadMessage(`上传完成：共 ${files.length} 张`)
+      }
+      if (!nextErrors.length && files.length > 0) {
+        setHonorUploadErrors([])
+      }
+      void refreshHonorGallery()
+    }
+  }
+
+  const removeHonorPhoto = (assetId: string) => {
+    setHonorGallery((current) => current.filter((item) => item.id !== assetId))
   }
 
 
@@ -737,13 +816,24 @@ export function AdminPage() {
     if (previousAssetId) {
       removeMediaAsset(previousAssetId)
     }
-    const dataUrl = await readFileAsDataUrl(file)
+    const typeError = validateAudioFile(file)
+    if (typeError) {
+      window.alert(typeError)
+      return
+    }
+    const audioResult = await uploadImageToLocalServer({
+      category: 'audio',
+      file,
+      title: file.name,
+      desc: kind === 'wordAudioAssetId' ? '单词真人发音' : '句子真人发音',
+    })
     const asset: MediaAsset = {
       id: createMediaId(kind === 'wordAudioAssetId' ? 'word-audio' : 'sentence-audio'),
       kind: 'audio',
       name: file.name,
       mimeType: file.type,
-      dataUrl,
+      dataUrl: '',
+      remoteUrl: audioResult.imageUrl,
       createdAt: new Date().toISOString(),
     }
     upsertMediaAsset(asset)
@@ -1026,28 +1116,54 @@ export function AdminPage() {
                 上传视频
                 <input
                   type="file"
-                  accept="video/*"
+                  accept="video/mp4"
                   multiple
                   onChange={async (event) => {
+                    if (videoUploadBusy) {
+                      event.target.value = ''
+                      return
+                    }
+                    setVideoUploadBusy(true)
                     setVideoUploadErrors([])
+                    setVideoUploadMessage('')
+                    setVideoUploadPercent(0)
                     const files = Array.from(event.target.files ?? [])
                     const errors: string[] = []
-                    for (let i = 0; i < files.length; i += 1) {
-                      const file = files[i]
-                      const error = await uploadPromoVideo(file, remoteVideoTitle, i + 1)
-                      if (error) {
-                        errors.push(`${file.name}：${error}`)
+                    try {
+                      for (let i = 0; i < files.length; i += 1) {
+                        const file = files[i]
+                        setVideoUploadMessage(`正在上传 ${i + 1}/${files.length}：${file.name}`)
+                        setVideoUploadPercent(0)
+                        const error = await uploadPromoVideo(file, remoteVideoTitle, i + 1, (percent) => {
+                          setVideoUploadPercent(percent)
+                          setVideoUploadMessage(`正在上传 ${i + 1}/${files.length}：${file.name}（${percent}%）`)
+                        })
+                        if (error) {
+                          errors.push(`${file.name}：${error}`)
+                        }
                       }
+                    } finally {
+                      setVideoUploadBusy(false)
+                      setVideoUploadPercent(0)
                     }
                     if (errors.length > 0) {
                       setVideoUploadErrors(errors)
+                    } else if (files.length > 0) {
+                      setVideoUploadMessage(`上传完成：共 ${files.length} 个视频`)
                     }
                     event.target.value = ''
                   }}
                 />
               </label>
-              <div className="admin-upload-note">本地上传默认按 5MB 分片上传（MP4），文件内容仅留存远端链接。</div>
+              {videoUploadPercent > 0 ? (
+                <div className="upload-progress">
+                  <span>上传进度：{videoUploadPercent}%</span>
+                  <div className="upload-progress-track"><i style={{ width: `${videoUploadPercent}%` }} /></div>
+                </div>
+              ) : null}
+              <div className="admin-upload-note">本地上传固定走 5MB 分片，本机开发服务直接落盘到 `public/media/videos`。</div>
               <small className="admin-upload-note">建议清晰横版 16:9，便于页面展示。</small>
+              {videoUploadMessage ? <div className="admin-upload-note">{videoUploadMessage}</div> : null}
               <label>
                 外链上传（R2/对象存储）
                 <div className="media-upload-block">
@@ -1123,7 +1239,7 @@ export function AdminPage() {
               <div className="promo-video-admin-list">
               {promoVideos.length > 0 ? promoVideos.map((video) => (
                   <article className="promo-video-card admin-video-card" key={video.id}>
-                    <video controls playsInline src={video.remoteUrl || video.dataUrl} />
+                    <video controls playsInline src={resolvePlayableVideoSource(video.remoteUrl || video.dataUrl || '') || ''} />
                     <div className="promo-video-copy">
                       <strong>{getPromoVideoDisplayTitle(video)}</strong>
                       <span>{video.desc || '机构宣传视频（待补充）'}</span>
@@ -1138,6 +1254,65 @@ export function AdminPage() {
                     <span>支持 mp4 / webm 等常见格式。上传后首页会自动展示。</span>
                   </div>
                 )}
+              </div>
+            </div>
+            <div className="media-admin-card">
+              <div className="admin-card-title">
+                <span>🏅</span>
+                <div>
+                  <strong>荣誉墙</strong>
+                  <small>上传学生作品、奖状、证书等照片</small>
+                </div>
+              </div>
+              <label>
+                批量上传照片
+                <input
+                  type="file"
+                  accept="image/*,.jpg,.jpeg,.png,.webp"
+                  multiple
+                  onChange={async (event) => {
+                    const files = Array.from(event.target.files ?? [])
+                    event.target.value = ''
+                    if (honorUploadBusy || files.length === 0) {
+                      return
+                    }
+                    await uploadHonorPhotos(files)
+                  }}
+                />
+              </label>
+              {honorUploadPercent > 0 ? (
+                <div className="upload-progress">
+                  <span>上传进度：{honorUploadPercent}%</span>
+                  <div className="upload-progress-track"><i style={{ width: `${honorUploadPercent}%` }} /></div>
+                </div>
+              ) : null}
+              {honorUploadMessage ? <div className="admin-upload-note">{honorUploadMessage}</div> : null}
+              {honorUploadErrors.length > 0 ? (
+                <div className="admin-upload-error">
+                  {honorUploadErrors.map((error, index) => <div key={`${index}-${error}`}>{error}</div>)}
+                </div>
+              ) : null}
+              <div className="admin-upload-note">支持 JPG / PNG / WEBP，单张 ≤8MB。</div>
+              <div className="promo-video-admin-list">
+                {honorPhotos.length > 0 ? honorPhotos.map((photo) => (
+                  <article className="admin-video-card admin-image-card" key={photo.id}>
+                    <img src={photo.remoteUrl || photo.dataUrl} alt={photo.name} />
+                    <div className="promo-video-copy">
+                      <strong>{photo.title || photo.name}</strong>
+                      <span>{photo.desc || '荣誉墙照片'}</span>
+                    </div>
+                    <button className="button button-small button-ghost" onClick={() => removeHonorPhoto(photo.id)}>
+                      <Trash2 size={15} /> 删除照片
+                    </button>
+                  </article>
+                )) : (
+                  <div className="promo-video-empty">
+                    <strong>还没有上传荣誉照片</strong>
+                    <span>点击上方支持批量上传，首页会自动展示在“荣誉墙”。</span>
+                  </div>
+                )}
+                {honorGalleryBusy ? <div className="admin-upload-note">荣誉配置同步中…</div> : null}
+                {honorGalleryError ? <div className="admin-upload-error">{honorGalleryError}</div> : null}
               </div>
             </div>
           </div>
@@ -1194,6 +1369,7 @@ export function AdminPage() {
                   <label className="span-two">教学特点<textarea value={teacher.teachingStyle} onChange={(event) => updateTeacher(teacher.id, 'teachingStyle', event.target.value)} /></label>
                   <label>头像链接<input value={teacher.avatarUrl} onChange={(event) => updateTeacher(teacher.id, 'avatarUrl', event.target.value)} /></label>
                   <label>图片上传<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadTeacherAvatar(teacher.id, event.target.files?.[0])} /></label>
+                  {teacherUploadProgress[teacher.id] ? <div className="upload-progress"><span>头像进度：{teacherUploadProgress[teacher.id]}%</span><div className="upload-progress-track"><i style={{ width: `${teacherUploadProgress[teacher.id]}%` }} /></div></div> : null}
                   <small className="admin-upload-note">支持 JPG / PNG / WEBP，单文件 ≤2MB，尺寸 300~2000px。</small>
                   {teacherAvatarErrors[teacher.id]
                     ? <small className="admin-upload-error">{teacherAvatarErrors[teacher.id]}</small>

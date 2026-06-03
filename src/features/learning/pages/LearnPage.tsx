@@ -2,7 +2,7 @@ import {
   ArrowLeft, ArrowRight, BookOpen, Check, ChevronLeft, ChevronRight, CircleAlert,
   Ear, Image, Keyboard, RotateCcw, Sparkles, Trophy, Volume2, X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useContentBundle } from '../../../shared/data-source'
 import { getMediaAsset, getMediaBinding, getProgress, savePracticeResult, saveProgress } from '../../../shared/services/storage'
@@ -33,19 +33,77 @@ function playMedia(asset: MediaAsset | undefined, fallbackText: string, onUnsupp
     speak(fallbackText, onUnsupported)
     return
   }
-  const audio = new Audio(asset.dataUrl)
+  const source = asset.remoteUrl || asset.dataUrl
+  if (!source) {
+    speak(fallbackText, onUnsupported)
+    return
+  }
+  const audio = new Audio(source)
   audio.onerror = () => speak(fallbackText, onUnsupported)
   void audio.play().catch(() => speak(fallbackText, onUnsupported))
 }
 
 export function LearnPage() {
   const { bundle } = useContentBundle()
-  const [progress, setProgress] = useState<ProgressState>(() => getProgress())
+  const [progress, setProgress] = useState<ProgressState | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [initError, setInitError] = useState('')
   const [mode, setMode] = useState<PracticeMode | null>(null)
   const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null)
   const [spellAnswer, setSpellAnswer] = useState('')
   const [speechWarning, setSpeechWarning] = useState(false)
   const courses = bundle.courses
+
+  useEffect(() => {
+    let mounted = true
+    void (async () => {
+      try {
+        const next = await getProgress()
+        if (mounted) {
+          setProgress(next)
+          setInitError('')
+        }
+      } catch {
+        if (mounted) {
+          setInitError('学习进度加载失败，已退回默认进度。')
+          setProgress({
+            learnedItemIds: [],
+            wrongItemIds: [],
+            courseId: courses[0]?.id ?? 'phonics',
+            unitId: courses[0]?.units[0]?.id ?? 'phonics-cvc',
+            currentItemIndex: 0,
+            practiceCount: 0,
+            correctCount: 0,
+          })
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false)
+        }
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [courses])
+
+  if (loading || !progress) {
+    return (
+      <div className="learn-page">
+        <header className="learn-header">
+          <Link to={ROUTES.home} className="brand">
+            <span className="brand-mark"><BookOpen size={22} /></span>
+            <span><strong>Aggie学习体验</strong><small>加载学习数据中…</small></span>
+          </Link>
+        </header>
+        <main className="learn-main">
+          <div className="feedback-empty">
+            <p>正在从本地服务器读取学习进度…</p>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   const course = courses.find((item) => item.id === progress.courseId) ?? courses[1]
   const unit = course.units.find((item) => item.id === progress.unitId) ?? course.units[0]
@@ -64,7 +122,7 @@ export function LearnPage() {
 
   const updateProgress = (next: ProgressState) => {
     setProgress(next)
-    saveProgress(next)
+    void saveProgress(next)
   }
 
   const selectCourse = (courseId: string) => {
@@ -113,7 +171,7 @@ export function LearnPage() {
       correctCount: progress.correctCount + (correct ? 1 : 0),
     }
     updateProgress(nextProgress)
-    savePracticeResult({
+    void savePracticeResult({
       itemId: currentItem.id,
       mode: mode ?? 'spell',
       correct,
@@ -147,6 +205,7 @@ export function LearnPage() {
       {speechWarning && (
         <div className="speech-warning"><CircleAlert size={17} /> 当前浏览器不支持语音播放，请更换现代浏览器体验。<button onClick={() => setSpeechWarning(false)}><X size={16} /></button></div>
       )}
+      {initError && <div className="speech-warning">{initError}</div>}
 
       <div className="learn-layout">
         <aside className="course-sidebar">

@@ -1,0 +1,18 @@
+services:
+  aggie-web:
+    build: .
+    container_name: aggie-english-web
+    ports:
+      - '4173:4173'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./public/media/videos:/app/public/media/videos
+      - ./public/media/teachers:/app/public/media/teachers
+      - ./public/media/honorImg:/app/public/media/honorImg
+      - ./public/media/feedback:/app/public/media/feedback
+      - ./public/media/audios:/app/public/media/audios
+      - ./src/data:/app/src/data
+    environment:
+      - NODE_ENV=development
+      - NO_PROXY=127.0.0.1,localhost

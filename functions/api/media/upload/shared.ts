@@ -109,7 +109,7 @@ function makeVideoSrc(env: Env, key: string) {
   if (publicBase) {
     return `${publicBase}/${key}`
   }
-  return `/${key}`
+  return `/api/media-download?key=${encodeURIComponent(key)}`
 }
 
 function canUseAuth(request: Request, token?: string) {

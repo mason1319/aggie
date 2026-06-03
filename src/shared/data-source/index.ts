@@ -1,4 +1,5 @@
 export * from './types'
 export { DEFAULT_APP_CONTENT } from './defaults'
+export { CONTENT_SOURCE_EVENT, DATA_SOURCE_MODE } from './config'
 export { getContentBundle, getContentMeta, getContentPlatform, getContentSnapshot, refreshContentBundle, saveContentBundle } from './contentStore'
 export { useContentBundle } from './useContentBundle'

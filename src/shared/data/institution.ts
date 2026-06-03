@@ -26,10 +26,10 @@ function makeAvatarDataUrl(label: string, accent: string) {
 const teachers: TeacherProfile[] = [
   {
     id: 'teacher-amy',
-    name: 'Amy 老师',
-    title: '国际音标与自然拼读主讲',
-    intro: '专注小学阶段发音启蒙，擅长把枯燥的规则变成孩子听得懂、学得会的练习。',
-    teachingStyle: '重视口型示范、跟读反馈和分层练习，让孩子先敢开口再开口更准。',
+    name: 'Ageie胡老师',
+    title: '新概念与综合英语主讲',
+    intro: 'Ageie胡老师曾任职昆山少年宫英语特聘教师，英语高级教师。深耕英语教育领域10年，教学十年间教了超2000名学生，专攻新概念英语+译林英语综合教学小学部:80%孩子成绩常年稳居班级前五，年级排名前100，校内英语举一反三初中部:胡老师凭借新概念英语提优体系，打造初二提招班，中考英语升学率达到80%以上，中考成绩115+。通过系统化的知识点拓展与能力训练，让众多学生考上心仪的高中。扎实的教学功底深受学生和家长的喜爱与信赖。',
+    teachingStyle: '专注提升听说读写综合能力，强调语音识别、句式迁移和错题复盘，帮助孩子形成稳定进步。',
     avatarUrl: makeAvatarDataUrl('A', '#7bc8a4'),
     accent: '#7bc8a4',
   },
@@ -96,9 +96,9 @@ export const defaultInstitutionProfile: InstitutionProfile = {
   teachers,
   qualityHighlights,
   timetable: [
-    { id: 't1', day: '周一', startTime: '18:30', endTime: '19:30', className: '自然拼读班', course: '基础拼读', teacher: 'Amy 老师', room: 'A 教室' },
+    { id: 't1', day: '周一', startTime: '18:30', endTime: '19:30', className: '自然拼读班', course: '基础拼读', teacher: 'Ageie胡老师', room: 'A 教室' },
     { id: 't2', day: '周二', startTime: '19:00', endTime: '20:00', className: '课内同步班', course: '校内英语巩固', teacher: 'Lily 老师', room: 'B 教室' },
-    { id: 't3', day: '周三', startTime: '18:30', endTime: '19:30', className: '音标启蒙班', course: '国际音标', teacher: 'Amy 老师', room: 'A 教室' },
+    { id: 't3', day: '周三', startTime: '18:30', endTime: '19:30', className: '音标启蒙班', course: '国际音标', teacher: 'Ageie胡老师', room: 'A 教室' },
     { id: 't4', day: '周四', startTime: '19:00', endTime: '20:00', className: '新概念启蒙班', course: '句子与表达', teacher: 'Mike 老师', room: 'C 教室' },
     { id: 't5', day: '周六', startTime: '09:00', endTime: '10:30', className: '春季提升班', course: '综合提升', teacher: 'Lily 老师', room: '主教室' },
     { id: 't6', day: '周日', startTime: '15:00', endTime: '16:30', className: '体验课', course: '预约试听', teacher: '全体老师', room: '体验区' },

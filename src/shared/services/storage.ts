@@ -1,3 +1,4 @@
+import { DEFAULT_APP_CONTENT, DEFAULT_FEEDBACK_LIBRARY } from '../data-source/defaults'
 import { defaultAdmissionSettings } from '../data/admissions'
 import { defaultFeedbackEntries } from '../data/feedback'
 import { defaultInstitutionProfile } from '../data/institution'
@@ -6,15 +7,8 @@ import type { FeedbackEntry, FeedbackLibrary } from '../types/feedback'
 import type { InstitutionProfile } from '../types/institution'
 import type { MediaAsset, MediaBinding, MediaLibrary } from '../types/media'
 import type { PracticeResult, ProgressState } from '../types/learning'
-
-export const STORAGE_KEYS = {
-  progress: 'aggie_english_progress_v1',
-  practiceResults: 'aggie_english_practice_results_v1',
-  admissions: 'aggie_english_admissions_v1',
-  institution: 'aggie_english_institution_v1',
-  media: 'aggie_english_media_v1',
-  feedback: 'aggie_english_feedback_v1',
-}
+import { getProgressState, getPracticeResultsState, savePracticeResultState, saveProgressState } from './progressApi'
+import { getContentSnapshot, saveContentBundle } from '../data-source/contentStore'
 
 const defaultProgress: ProgressState = {
   learnedItemIds: [],
@@ -26,51 +20,84 @@ const defaultProgress: ProgressState = {
   correctCount: 0,
 }
 
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function writeJson<T>(key: string, value: T) {
-  localStorage.setItem(key, JSON.stringify(value))
-  window.dispatchEvent(new CustomEvent('aggie-storage-change', { detail: { key } }))
-}
-
-const defaultMediaLibrary: MediaLibrary = {
-  assets: [],
-  itemBindings: {},
-}
-
 const defaultFeedbackLibrary: FeedbackLibrary = {
   entries: defaultFeedbackEntries,
 }
 
-export function getProgress() {
-  return readJson<ProgressState>(STORAGE_KEYS.progress, defaultProgress)
+function getBundleSnapshot() {
+  return getContentSnapshot()
 }
 
-export function saveProgress(progress: ProgressState) {
-  writeJson(STORAGE_KEYS.progress, progress)
+function getDefaultMediaLibrary(): MediaLibrary {
+  return {
+    ...DEFAULT_APP_CONTENT.media,
+  }
 }
 
-export function getPracticeResults() {
-  return readJson<PracticeResult[]>(STORAGE_KEYS.practiceResults, [])
+function updateBundle(mutator: (current: {
+  admission: AdmissionSettings
+  institution: InstitutionProfile
+  media: MediaLibrary
+  feedback: FeedbackLibrary
+}) => void) {
+  const snapshot = getBundleSnapshot()
+  const next = {
+    ...snapshot,
+    admission: { ...snapshot.admission },
+    institution: { ...snapshot.institution },
+    media: { ...snapshot.media, assets: [...snapshot.media.assets], itemBindings: { ...snapshot.media.itemBindings } },
+    feedback: { ...snapshot.feedback, entries: [...snapshot.feedback.entries] },
+  }
+  updateBundleCore(next, mutator)
 }
 
-export function savePracticeResult(result: PracticeResult) {
-  writeJson(STORAGE_KEYS.practiceResults, [...getPracticeResults(), result].slice(-100))
+function updateBundleCore(
+  base: ReturnType<typeof getBundleSnapshot>,
+  mutator: (current: {
+    admission: AdmissionSettings
+    institution: InstitutionProfile
+    media: MediaLibrary
+    feedback: FeedbackLibrary
+  }) => void,
+) {
+  const next = { ...base }
+  mutator({
+    admission: next.admission,
+    institution: next.institution,
+    media: next.media,
+    feedback: next.feedback,
+  })
+  void saveContentBundle(next)
+}
+
+export async function getProgress(): Promise<ProgressState> {
+  const result = await getProgressState()
+  if (result) {
+    return { ...defaultProgress, ...result }
+  }
+  return { ...defaultProgress }
+}
+
+export async function saveProgress(progress: ProgressState): Promise<void> {
+  await saveProgressState(progress)
+}
+
+export async function getPracticeResults(): Promise<PracticeResult[]> {
+  return getPracticeResultsState()
+}
+
+export async function savePracticeResult(result: PracticeResult): Promise<void> {
+  await savePracticeResultState(result)
 }
 
 export function getAdmissionSettings() {
-  return readJson<AdmissionSettings>(STORAGE_KEYS.admissions, defaultAdmissionSettings)
+  return { ...defaultAdmissionSettings, ...getBundleSnapshot().admission }
 }
 
 export function saveAdmissionSettings(settings: AdmissionSettings) {
-  writeJson(STORAGE_KEYS.admissions, settings)
+  updateBundle((draft) => {
+    draft.admission = settings
+  })
 }
 
 export function resetAdmissionSettings() {
@@ -78,11 +105,13 @@ export function resetAdmissionSettings() {
 }
 
 export function getInstitutionProfile() {
-  return { ...defaultInstitutionProfile, ...readJson<InstitutionProfile>(STORAGE_KEYS.institution, defaultInstitutionProfile) }
+  return { ...defaultInstitutionProfile, ...getBundleSnapshot().institution }
 }
 
 export function saveInstitutionProfile(profile: InstitutionProfile) {
-  writeJson(STORAGE_KEYS.institution, profile)
+  updateBundle((draft) => {
+    draft.institution = profile
+  })
 }
 
 export function resetInstitutionProfile() {
@@ -90,15 +119,22 @@ export function resetInstitutionProfile() {
 }
 
 export function getMediaLibrary() {
-  return readJson<MediaLibrary>(STORAGE_KEYS.media, defaultMediaLibrary)
+  return {
+    ...getDefaultMediaLibrary(),
+    ...getBundleSnapshot().media,
+    assets: [...getBundleSnapshot().media.assets],
+    itemBindings: { ...getBundleSnapshot().media.itemBindings },
+  }
 }
 
 export function saveMediaLibrary(library: MediaLibrary) {
-  writeJson(STORAGE_KEYS.media, library)
+  updateBundle((draft) => {
+    draft.media = library
+  })
 }
 
-export function resetMediaLibrary() {
-  saveMediaLibrary(defaultMediaLibrary)
+export function resetMediaState() {
+  saveMediaLibrary(getDefaultMediaLibrary())
 }
 
 export function getMediaAsset(assetId?: string) {
@@ -153,16 +189,21 @@ export function removeMediaAsset(assetId: string) {
   saveMediaLibrary({ assets, itemBindings })
 }
 
-export function resetMediaState() {
-  resetMediaLibrary()
-}
-
 export function getFeedbackLibrary() {
-  return readJson<FeedbackLibrary>(STORAGE_KEYS.feedback, defaultFeedbackLibrary)
+  const cached = getBundleSnapshot().feedback
+  if (cached && Array.isArray(cached.entries)) {
+    return { ...defaultFeedbackLibrary, ...cached, entries: cached.entries }
+  }
+  return {
+    ...DEFAULT_FEEDBACK_LIBRARY,
+    ...defaultFeedbackLibrary,
+  }
 }
 
 export function saveFeedbackLibrary(library: FeedbackLibrary) {
-  writeJson(STORAGE_KEYS.feedback, library)
+  updateBundle((draft) => {
+    draft.feedback = { ...library, entries: [...library.entries] }
+  })
 }
 
 export function resetFeedbackLibrary() {

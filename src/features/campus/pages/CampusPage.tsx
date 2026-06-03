@@ -2,7 +2,7 @@ import {
   ArrowLeft, ArrowRight, CheckCircle2, CalendarDays, Copy, MapPinned, MessageCircle, ParkingCircle,
   Quote, School, ShieldCheck, Star, TrainFront, UsersRound,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AppHeader } from '../../../shared/components/AppHeader'
 import { SectionTitle } from '../../../shared/components/SectionTitle'
@@ -12,6 +12,11 @@ import { getMediaAsset } from '../../../shared/services/storage'
 import type { MediaAsset } from '../../../shared/types/media'
 import { ROUTES } from '../../../shared/constants/routes'
 import type { InstitutionProfile } from '../../../shared/types/institution'
+import videoCatalog from '../../../data/video.json'
+import {
+  resolvePlayableVideoSource,
+  resolvePlayableVideoSources,
+} from '../../../shared/media/videoSource'
 
 function iconByName(name: string) {
   switch (name) {
@@ -45,6 +50,138 @@ function buildAmapNearbyUrl(institution: InstitutionProfile) {
   return `https://uri.amap.com/search?keyword=${keyword}&view=map&src=mypage&callnative=0`
 }
 
+type VideoMeta = {
+  videoSrc: string
+  title: string
+  desc: string
+}
+type VideoCardMeta = {
+  videoSources: string[]
+  title: string
+  desc: string
+}
+
+const customVideoCatalog = videoCatalog as VideoMeta[]
+const VIDEO_TITLE_FALLBACK = '机构视频'
+const VIDEO_DESC_FALLBACK = '课堂活动与学习内容展示。'
+function isLikelyHashedName(value: string) {
+  const normalized = value.replace(/\.[^/.]+$/, '').trim()
+  if (!normalized) {
+    return false
+  }
+  return /^[0-9a-f]{16,}$/i.test(normalized) || /^[0-9a-f]{8,}-[0-9a-f]{8,}$/i.test(normalized)
+}
+
+function getVideoMeta(video: MediaAsset) {
+  const sourceList = [video.remoteUrl, video.dataUrl]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item))
+  if (sourceList.length === 0) {
+    return null
+  }
+
+  const sources = sourceList.flatMap((source) => resolvePlayableVideoSources(source))
+  const dedupedSources = Array.from(new Set(sources))
+  if (dedupedSources.length === 0) {
+    return null
+  }
+
+  const catalogMatchedSource = sourceList.find((source) => customVideoCatalog.some((item) => item.videoSrc === source))
+  const matched = catalogMatchedSource ? customVideoCatalog.find((item) => item.videoSrc === catalogMatchedSource) : undefined
+  if (!matched) {
+    const originTitle = (video.title || '').trim() || video.name.replace(/\.[^/.]+$/, '').trim()
+    const fallbackTitle = !originTitle || isLikelyHashedName(originTitle) ? VIDEO_TITLE_FALLBACK : originTitle
+    return {
+      videoSources: dedupedSources,
+      title: fallbackTitle,
+      desc: (video.desc || '').trim() || VIDEO_DESC_FALLBACK,
+    }
+  }
+  return {
+    videoSources: dedupedSources,
+    title: matched.title,
+    desc: matched.desc,
+  }
+}
+
+function normalizeCatalogCards() {
+  return customVideoCatalog
+    .map((item) => {
+      const videoSrc = resolvePlayableVideoSource(item.videoSrc)
+      const title = item.title?.trim()
+      const desc = item.desc?.trim()
+      if (!videoSrc || !title || !desc) {
+        return null
+      }
+      return {
+        videoSrc,
+        title,
+        desc,
+      }
+    })
+    .filter((item): item is {
+      videoSrc: string
+      title: string
+      desc: string
+    } => item !== null)
+}
+
+function normalizeVideoSourceForCompare(videoSrc: string) {
+  const source = videoSrc.trim()
+  if (!source) {
+    return ''
+  }
+
+  if (source.startsWith('/api/media-download?')) {
+    const queryStart = source.indexOf('?')
+    if (queryStart >= 0) {
+      const params = new URLSearchParams(source.slice(queryStart + 1))
+      const key = params.get('key')
+      if (key) {
+        return `/${key}`
+      }
+    }
+  }
+
+  return source
+}
+
+function PromoVideoPlayer({ sources, title }: { sources: string[], title: string }) {
+  const playableSources = useMemo(() => sources.filter((item, index, arr) => arr.indexOf(item) === index), [sources.join('|')])
+  const [sourceIndex, setSourceIndex] = useState(0)
+  const [exhausted, setExhausted] = useState(false)
+
+  useEffect(() => {
+    setSourceIndex(0)
+    setExhausted(false)
+  }, [sources.join('|')])
+
+  const handleError = () => {
+    setSourceIndex((current) => {
+      const next = current + 1
+      if (next >= playableSources.length) {
+        setExhausted(true)
+        return current
+      }
+      return next
+    })
+  }
+
+  if (playableSources.length === 0 || exhausted) {
+    return <div className="promo-video-empty">视频资源暂不可用</div>
+  }
+
+  return (
+    <video
+      controls
+      playsInline
+      src={playableSources[sourceIndex]}
+      title={title}
+      onError={handleError}
+    />
+  )
+}
+
 export function CampusPage() {
   const { bundle } = useContentBundle()
   const institution = bundle.institution
@@ -53,7 +190,39 @@ export function CampusPage() {
   const [copyLabel, setCopyLabel] = useState('复制地址')
   const campusVideos = institution.promoVideoAssetIds
     .map((assetId) => getMediaAsset(assetId))
-    .filter((asset): asset is MediaAsset => asset !== undefined && asset.kind === 'video')
+    .filter((asset): asset is MediaAsset => {
+      if (asset === undefined || asset.kind !== 'video') {
+        return false
+      }
+      return Boolean(resolvePlayableVideoSource(asset.remoteUrl || asset.dataUrl || ''))
+    })
+  const campusVideoCards = (() => {
+    const boundCards = campusVideos
+      .map((video) => getVideoMeta(video))
+      .filter((item): item is VideoCardMeta => item !== null)
+    const catalogCards = normalizeCatalogCards()
+    const seen = new Set(boundCards.map((item) => normalizeVideoSourceForCompare(item.videoSources[0])))
+    const fallbackCards = catalogCards.filter((item) => {
+      const normalized = normalizeVideoSourceForCompare(item.videoSrc)
+      if (!normalized || seen.has(normalized)) {
+        return false
+      }
+      seen.add(normalized)
+      return true
+    })
+    const normalizedFallbackCards = fallbackCards.map((item) => {
+      const videoSources = resolvePlayableVideoSources(item.videoSrc)
+      if (videoSources.length === 0) {
+        return null
+      }
+      return {
+        videoSources,
+        title: item.title,
+        desc: item.desc,
+      }
+    }).filter((item): item is VideoCardMeta => item !== null)
+    return [...boundCards, ...normalizedFallbackCards]
+  })()
 
   const copyAddress = async () => {
     try {
@@ -106,7 +275,7 @@ export function CampusPage() {
                   <div className="teacher-content">
                     <span className="teacher-badge" style={{ color: teacher.accent, background: `${teacher.accent}18` }}>{teacher.title}</span>
                     <h3>{teacher.name}</h3>
-                    <p>{teacher.intro}</p>
+                    <p className="teacher-description">{teacher.intro}</p>
                     <div className="teacher-note">
                       <CheckCircle2 size={16} />
                       <span>{teacher.teachingStyle}</span>
@@ -122,16 +291,16 @@ export function CampusPage() {
           <div className="container">
             <SectionTitle eyebrow="机构视频" title="宣传视频、课堂片段、家长说明可批量展示" description="支持上传多条视频，不再固定成单一视频卡片。" />
             <div className="video-count-bar">
-              <strong>{campusVideos.length}</strong>
+              <strong>{campusVideoCards.length}</strong>
               <span>条视频素材</span>
             </div>
-            <div className="promo-video-grid">
-              {campusVideos.length > 0 ? campusVideos.map((video) => (
-                <article className="promo-video-card" key={video.id}>
-                  <video controls playsInline src={video.dataUrl} />
+            <div className={`promo-video-grid ${campusVideoCards.length > 2 ? 'promo-video-grid-scrollable' : ''}`}>
+              {campusVideoCards.length > 0 ? campusVideoCards.map((video) => (
+                <article className="promo-video-card" key={video.videoSources[0]}>
+                  <PromoVideoPlayer sources={video.videoSources} title={video.title} />
                   <div className="promo-video-copy">
-                    <strong>{video.name}</strong>
-                    <span>上传时间：{new Date(video.createdAt).toLocaleDateString('zh-CN')}</span>
+                    <strong>{video.title}</strong>
+                    <span>{video.desc}</span>
                   </div>
                 </article>
               )) : (

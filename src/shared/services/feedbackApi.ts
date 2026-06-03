@@ -1,4 +1,3 @@
-import { getFeedbackLibrary, saveFeedbackLibrary } from './storage'
 import type { FeedbackEntry, FeedbackRole } from '../types/feedback'
 
 const FEEDBACK_API_PATH = '/api/feedback'
@@ -21,6 +20,8 @@ export interface FeedbackSyncResult {
   source: FeedbackSource
 }
 
+let feedbackCache: FeedbackEntry[] = []
+
 function normalizeEntry(entry: FeedbackEntry): FeedbackEntry {
   return {
     ...entry,
@@ -35,6 +36,10 @@ function normalizeEntries(entries: FeedbackEntry[]) {
 
 function mergeEntries(entries: FeedbackEntry[], incoming: FeedbackEntry) {
   return [incoming, ...entries.filter((entry) => entry.id !== incoming.id)]
+}
+
+function getCachedFeedback() {
+  return normalizeEntries(feedbackCache)
 }
 
 async function requestFeedbackApi<T>(init?: RequestInit): Promise<T> {
@@ -58,10 +63,10 @@ export async function loadFeedbackEntries(): Promise<FeedbackSyncResult> {
   try {
     const payload = await requestFeedbackApi<{ entries: FeedbackEntry[] }>()
     const entries = normalizeEntries(payload.entries ?? [])
-    saveFeedbackLibrary({ entries })
+    feedbackCache = entries
     return { entries, source: 'cloud' }
   } catch {
-    const cachedEntries = normalizeEntries(getFeedbackLibrary().entries)
+    const cachedEntries = getCachedFeedback()
     if (cachedEntries.length > 0) {
       return { entries: cachedEntries, source: 'cache' }
     }
@@ -88,12 +93,12 @@ export async function submitFeedbackEntry(input: FeedbackSubmissionInput): Promi
       body: JSON.stringify(draft),
     })
     const entry = normalizeEntry(payload.entry)
-    const cached = mergeEntries(normalizeEntries(getFeedbackLibrary().entries), entry)
-    saveFeedbackLibrary({ entries: cached })
+    const cached = mergeEntries(getCachedFeedback(), entry)
+    feedbackCache = cached
     return { entries: cached, source: 'cloud' }
   } catch {
-    const cached = mergeEntries(normalizeEntries(getFeedbackLibrary().entries), draft)
-    saveFeedbackLibrary({ entries: cached })
+    const cached = mergeEntries(getCachedFeedback(), draft)
+    feedbackCache = cached
     return { entries: cached, source: 'offline' }
   }
 }

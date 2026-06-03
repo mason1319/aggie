@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "env -u http_proxy -u https_proxy -u all_proxy -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY NO_PROXY=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost npm run dev -- --host 127.0.0.1 --port 4173",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "verify:api": "node scripts/verify-aggie-cloudflare-api.mjs"
@@ -16,6 +17,7 @@
     "react-router-dom": "^7.1.1"
   },
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

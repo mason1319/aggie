@@ -23,8 +23,9 @@ interface InitPayload {
   desc: string
 }
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
-  if (!canUseAuth(context.request, context.env.AGGIE_MEDIA_UPLOAD_TOKEN)) {
+async function handleUploadInit(context: { request: Request, env: Env }): Promise<Response> {
+  const request = context.request
+  if (!canUseAuth(request, context.env.AGGIE_MEDIA_UPLOAD_TOKEN)) {
     return jsonResponse({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -33,7 +34,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ error: 'AGGIE_MEDIA_BUCKET 未绑定，无法初始化上传。' }, { status: 500 })
   }
 
-  const body = await context.request.json().catch(() => null)
+  const body = await request.json().catch(() => null)
   const raw = body && typeof body === 'object' ? body as Partial<InitPayload> : null
   const fileName = safeString(raw?.fileName, `video-${Date.now()}.mp4`)
   const mimeType = safeString(raw?.mimeType, 'video/mp4')
@@ -91,4 +92,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   })
 }
 
-export const onRequestOptions: PagesFunction = async () => corsPreflightResponse()
+export const onRequest: PagesFunction<Env> = async (context) => {
+  if (context.request.method === 'POST') {
+    return handleUploadInit(context)
+  }
+
+  if (context.request.method === 'OPTIONS') {
+    return corsPreflightResponse()
+  }
+
+  return jsonResponse({ error: 'Method Not Allowed' }, { status: 405 })
+}

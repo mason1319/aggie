@@ -10,7 +10,7 @@
 - 学习内容、招生文案、机构信息、教学资源上传、反馈入口保持同一份数据定义。
 - 每个平台只需要独立负责 UI 适配和路由承载，不重复业务模型定义。
 - 当前实现聚焦“可运行原型 + 后续可扩展”，数据持久化支持：
-  - 本地模式：直接读写浏览器 `localStorage`（用于本机演示）
+  - 本地模式：走内存态默认值（不落浏览器持久化）
   - 远端模式：读写 Cloudflare Function 接口（为多端接入准备）
   - 混合模式：先尝试远端，失败回退本地（默认）
 
@@ -31,7 +31,7 @@ src/
 │   ├── constants/        # 路由与锚点
 │   ├── data/             # 默认示例数据（课程、招生、反馈、机构）
 │   ├── data-source/      # 统一内容源适配层（本地/远端/混合）
-│   ├── services/         # localStorage 与 API 调用封装
+│   ├── services/         # 服务与 API 调用封装
 │   └── types/            # 统一类型定义
 └── main.tsx              # React 入口
 
@@ -64,7 +64,7 @@ functions/
 - `AppMeta`（含版本号）
 
 ### 2) 数据源实现
-- `src/shared/data-source/local.ts`：本地读取 `localStorage`（默认本机演示）
+- `src/shared/data-source/local.ts`：本地运行时模式（内存态快照，适合离线/本机演示）
 - `src/shared/data-source/remote.ts`：云端请求 `/api/content`
 - `src/shared/data-source/hybrid.ts`：远端优先，失败回退本地
 - `src/shared/data-source/contentStore.ts`：统一缓存、加载态、刷新通知
@@ -73,7 +73,7 @@ functions/
 ### 3) 当前数据口径
 - 招生、机构、反馈列表、媒体绑定：已通过统一 bundle 管理。
 - 课程学习结构 `courses` 仍以默认示例为基线；后续可在云端接口返回值中逐步支持课程后台管理。
-- 本机学习进度、错词本、练习结果仍保持本地可追踪，后续可扩展到用户系统后统一同步。
+- 学习进度与练习记录走 `/api/progress` 服务端统一持久化（当前无本地浏览器持久化）。
 
 ## 四、云端内容 API
 
@@ -86,15 +86,29 @@ functions/
 - GET：读取内容包
 - PUT：保存内容包（写入 KV，需鉴权）
 
+### `/api/media/upload/init` + `/api/media/upload/chunk` + `/api/media/upload/complete`
+- POST：机构视频分片上传（本机环境默认写入 `public/media/videos`，并更新 `src/data/video.json`）
+- 分片逻辑：`init` 返回 `uploadId`，`chunk` 逐段上传，`complete` 合并并返回播放地址
+- `/api/media-download?key=...`：Cloudflare 环境下流式读取 R2 文件（支持 Range 断点续传）
+
 环境变量：
 - `AGGIE_CONTENT_KV`：Cloudflare KV，用于存储内容包
 - `AGGIE_CONTENT_ADMIN_TOKEN`：用于 `/api/content` 写权限（建议必配）
+- `AGGIE_MEDIA_BUCKET`：CF 环境下视频存储桶（R2）
+- `AGGIE_MEDIA_PUBLIC_BASE`：CF 视频公开访问前缀（如 `https://xxx.public.r2.dev`）
+- `AGGIE_MEDIA_UPLOAD_TOKEN`：CF 分片上传鉴权 token（建议配置）
+
+说明：`AGGIE_MEDIA_PUBLIC_BASE` 未配置时，系统会自动回退到
+`/api/media-download?key=...`，因此同一个页面仍可正常通过 Cloudflare Functions 播放上传视频。若未绑定 R2，则上传会直接返回
+`AGGIE_MEDIA_BUCKET 未绑定`，视频也无法展示。
 
 前端配置：
 - `VITE_AGGIE_CONTENT_SOURCE`：`local | remote | hybrid`
 - `VITE_AGGIE_CONTENT_API`：如 `/api`
 - `VITE_AGGIE_PLATFORM`：`web | h5 | wechat-mini | app`
 - `VITE_AGGIE_CONTENT_ADMIN_TOKEN`：前端写 `/api/content` 时的鉴权 token（可选，未设置则不携带）
+- `VITE_AGGIE_MEDIA_UPLOAD_BASE`：上传服务基址，默认留空走本地 `/api`，失败后可填 CF 上传域名（例如 `https://xxx.workers.dev/api`）
+- `VITE_AGGIE_MEDIA_UPLOAD_TOKEN`：CF 上传鉴权 token
 
 ## 五、运行与部署
 
@@ -130,6 +144,7 @@ Cloudflare Pages 重点配置：
 ## 八、下一步建议（建议你先执行）
 1. 在本机完成 Cloudflare 接口联调：
    - 绑定 KV（`AGGIE_CONTENT_KV`）和 D1（`FEEDBACK_DB`）
+   - 绑定 R2 Bucket：变量名 `AGGIE_MEDIA_BUCKET`（必配），挂载你的 R2 bucket
    - 执行 `npm run verify:api`（本地或线上）
 2. 登录 Cloudflare Pages 后端环境变量：
    - `VITE_AGGIE_CONTENT_SOURCE=hybrid`

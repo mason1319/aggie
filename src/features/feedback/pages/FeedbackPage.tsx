@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AppHeader } from '../../../shared/components/AppHeader'
 import { SectionTitle } from '../../../shared/components/SectionTitle'
-import { useContentBundle } from '../../../shared/data-source'
+import { CONTENT_SOURCE_EVENT, getContentSnapshot, useContentBundle } from '../../../shared/data-source'
 import { FEEDBACK_SYNC_INTERVAL_MS, loadFeedbackEntries, submitFeedbackEntry } from '../../../shared/services/feedbackApi'
+import { uploadImageToLocalServer } from '../../../shared/services/imageUpload'
 import { ROUTES } from '../../../shared/constants/routes'
-import { getFeedbackLibrary } from '../../../shared/services/storage'
 import type { FeedbackEntry, FeedbackRole } from '../../../shared/types/feedback'
 
 function makeAvatarDataUrl(label: string, accent: string) {
@@ -51,6 +51,8 @@ export function FeedbackPage() {
   const [source, setSource] = useState<'cloud' | 'cache' | 'offline'>('cache')
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [avatarProgress, setAvatarProgress] = useState(0)
+  const [feedbackImageProgress, setFeedbackImageProgress] = useState(0)
 
   const refreshEntries = async () => {
     try {
@@ -70,7 +72,7 @@ export function FeedbackPage() {
     void refreshEntries()
 
     const syncFromCache = () => {
-      setEntries(getFeedbackLibrary().entries)
+      setEntries(getContentSnapshot().feedback.entries)
     }
 
     const handleVisibility = () => {
@@ -83,15 +85,13 @@ export function FeedbackPage() {
       void refreshEntries()
     }, FEEDBACK_SYNC_INTERVAL_MS)
 
-    window.addEventListener('storage', syncFromCache)
-    window.addEventListener('aggie-storage-change', syncFromCache)
+    window.addEventListener(CONTENT_SOURCE_EVENT, syncFromCache)
     window.addEventListener('focus', handleVisibility)
     document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
       window.clearInterval(interval)
-      window.removeEventListener('storage', syncFromCache)
-      window.removeEventListener('aggie-storage-change', syncFromCache)
+      window.removeEventListener(CONTENT_SOURCE_EVENT, syncFromCache)
       window.removeEventListener('focus', handleVisibility)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
@@ -141,16 +141,42 @@ export function FeedbackPage() {
 
   const uploadAvatar = async (file: File | undefined) => {
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setAvatarUrl(String(reader.result))
-    reader.readAsDataURL(file)
+    setError('')
+    setAvatarProgress(0)
+    try {
+      const result = await uploadImageToLocalServer({
+        category: 'feedback',
+        file,
+        title: `${name || '反馈者'}头像`,
+        desc: '反馈头像',
+        onProgress: setAvatarProgress,
+      })
+      setAvatarUrl(result.imageUrl)
+      setAvatarProgress(0)
+    } catch {
+      setError('头像上传失败，请稍后重试。')
+      setAvatarProgress(0)
+    }
   }
 
   const uploadImage = async (file: File | undefined) => {
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setImageUrl(String(reader.result))
-    reader.readAsDataURL(file)
+    setError('')
+    setFeedbackImageProgress(0)
+    try {
+      const result = await uploadImageToLocalServer({
+        category: 'feedback',
+        file,
+        title: `${name || '反馈者'}附件`,
+        desc: '反馈附图',
+        onProgress: setFeedbackImageProgress,
+      })
+      setImageUrl(result.imageUrl)
+      setFeedbackImageProgress(0)
+    } catch {
+      setError('附件图片上传失败，请稍后重试。')
+      setFeedbackImageProgress(0)
+    }
   }
 
   return (
@@ -223,10 +249,22 @@ export function FeedbackPage() {
                   头像上传
                   <input type="file" accept="image/*" onChange={(event) => void uploadAvatar(event.target.files?.[0])} />
                 </label>
+                {avatarProgress > 0 ? (
+                  <div className="upload-progress">
+                    <span>头像上传：{avatarProgress}%</span>
+                    <div className="upload-progress-track"><i style={{ width: `${avatarProgress}%` }} /></div>
+                  </div>
+                ) : null}
                 <label>
                   附图上传
                   <input type="file" accept="image/*" onChange={(event) => void uploadImage(event.target.files?.[0])} />
                 </label>
+                {feedbackImageProgress > 0 ? (
+                  <div className="upload-progress">
+                    <span>附件上传：{feedbackImageProgress}%</span>
+                    <div className="upload-progress-track"><i style={{ width: `${feedbackImageProgress}%` }} /></div>
+                  </div>
+                ) : null}
               </div>
               <div className="feedback-form-preview">
                 <div className="feedback-preview-avatar">

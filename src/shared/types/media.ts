@@ -1,4 +1,4 @@
-export type MediaKind = 'audio' | 'video'
+export type MediaKind = 'audio' | 'video' | 'image'
 
 export interface MediaAsset {
   id: string

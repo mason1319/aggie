@@ -1,1 +1,4 @@
-/*    /index.html   200
+/media/videos/* /media/videos/:splat 200
+/media/* /media/:splat 200
+/api/media-download /api/media-download 200
+/* /index.html 200
