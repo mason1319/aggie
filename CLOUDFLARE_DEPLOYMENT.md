@@ -128,3 +128,108 @@ npm run verify:api -- --base http://localhost:4173 --token <你的TOKEN>
   - 读取 `https://aggieai.me/api/content`
   - 缓存 `meta.schemaVersion`
   - 适配 `InstitutionProfile`、`AdmissionSettings`、课程结构与媒体列表显示
+
+## 10. 公网为什么“本地有图/视频，公网看不到”的复现根因
+
+已在 `aggieai.me` 复现到同一问题：
+
+- `/api/honor` 已返回 `[]`（`AGGIE_CONTENT_KV` 绑定链路在工作）；
+- `/api/media-upload-image-init` 返回 `500` 且消息为：`AGGIE_MEDIA_BUCKET 未绑定`；
+- 本质是 `media` 路由已命中，但缺失 R2 绑定，导致文件无法落盘，前端自然无回显。
+
+先把这条线补齐：`AGGIE_MEDIA_BUCKET` 必须在 Pages Functions Binding 中绑定到可写的 R2 桶。
+
+## 11. CF 上线最终修复清单（照着做）
+
+### 11.1 先在 Dashboard（推荐，最稳）
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. 进入 `Workers & Pages -> aggieai -> Settings -> Functions -> Bindings`
+3. 依次添加：
+   - `R2 Bucket` -> `AGGIE_MEDIA_BUCKET` -> 选择你的 bucket（示例名：`aggie-media`）
+   - `KV Namespace` -> `AGGIE_CONTENT_KV` -> 已有 namespace
+   - `D1 Database` -> `FEEDBACK_DB` -> 已有数据库
+4. 在 `Settings -> Environment variables` 设置：
+   - `VITE_AGGIE_CONTENT_SOURCE=hybrid`
+   - `VITE_AGGIE_CONTENT_API=/api`
+   - `VITE_AGGIE_PLATFORM=web`
+   - `VITE_AGGIE_CONTENT_ADMIN_TOKEN=<后端写权限 token>`（可选）
+5. 继续补上后端鉴权配置（若你启用上传鉴权）：
+   - `AGGIE_MEDIA_UPLOAD_TOKEN=<上传 token>`
+   - `VITE_AGGIE_MEDIA_UPLOAD_TOKEN=<同上>`
+6. 可选：如需公共 URL，设置 `AGGIE_MEDIA_PUBLIC_BASE`（不设置也可回退到 `/api/media-download?key=...`）。
+7. 保存并重新触发一次部署（或等待自动发布）。
+
+### 11.2 可执行 CLI 清单（含 token 示例）
+
+```bash
+# 安装 wrangler
+npm i -g wrangler
+wrangler login
+
+# 已知账号与项目（按你实际值替换）
+export CF_API_TOKEN=cfat_你真实的Token
+export CF_ACCOUNT_ID=fc7c3a49d9ee4bc30625a28d895c2b0c
+export CF_PROJECT_NAME=aggieai
+
+# 验证项目状态
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/$CF_PROJECT_NAME" \
+  -H "Authorization: Bearer $CF_API_TOKEN"
+
+# 发布环境变量设置（部分版本会直接支持，若不支持请回到 Dashboard）
+wrangler pages project env var put VITE_AGGIE_CONTENT_SOURCE=hybrid --project-name "$CF_PROJECT_NAME" --env production
+wrangler pages project env var put VITE_AGGIE_CONTENT_API=/api --project-name "$CF_PROJECT_NAME" --env production
+wrangler pages project env var put VITE_AGGIE_PLATFORM=web --project-name "$CF_PROJECT_NAME" --env production
+
+# 密钥（建议 Secret，不留明文）
+wrangler pages secret put AGGIE_MEDIA_UPLOAD_TOKEN --project-name "$CF_PROJECT_NAME" --env production
+wrangler pages secret put VITE_AGGIE_MEDIA_UPLOAD_TOKEN --project-name "$CF_PROJECT_NAME" --env production
+wrangler pages secret put VITE_AGGIE_CONTENT_ADMIN_TOKEN --project-name "$CF_PROJECT_NAME" --env production
+
+# 触发一次手动部署
+curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/pages/projects/$CF_PROJECT_NAME/deployments" \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"branch":"main"}'
+```
+
+> 提示：`AGGIE_MEDIA_BUCKET`、`AGGIE_CONTENT_KV`、`FEEDBACK_DB` 是 **Bindings**，不总能通过 `env var` 命令统一设置；如 CLI 报错，回 Dashboard 按第一节操作。
+
+### 11.3 绑定完成后的线上验收（按顺序执行）
+
+```bash
+curl -i "https://aggieai.me/api/honor" -H "Accept: application/json"
+
+curl -i -X POST "https://aggieai.me/api/media-upload-image-init" \
+  -H "Content-Type: application/json" \
+  --data '{"category":"honor","fileName":"verify.png","mimeType":"image/png","fileSize":1024,"totalChunks":1,"title":"verify","desc":"verify"}'
+
+curl -i -X POST "https://aggieai.me/api/media-upload-init" \
+  -H "Content-Type: application/json" \
+  --data '{"fileName":"verify.mp4","mimeType":"video/mp4","fileSize":5242880,"totalChunks":2,"title":"verify","desc":"verify"}'
+```
+
+期望结果：
+
+- `/api/honor` 可返回数组（至少空数组也可）
+- `/api/media-upload-image-init` 返回 `200` 且含 `uploadId`
+- `/api/media-upload-init` 返回 `200` 且含 `uploadId`
+
+若仍报 `AGGIE_MEDIA_BUCKET 未绑定`，说明 R2 绑定未生效，需要回到 Step 11.1 重新检查并保存设置。
+
+## 12. 一次性命令清单（你现在可直接抄）
+
+```bash
+# A. 给我直接执行的顺序
+1) Dashboard：Settings -> Functions -> Bindings
+2) 设置：AGGIE_MEDIA_BUCKET、AGGIE_CONTENT_KV、FEEDBACK_DB
+3) Settings -> Environment variables：VITE_AGGIE_CONTENT_SOURCE、VITE_AGGIE_CONTENT_API、VITE_AGGIE_PLATFORM
+4) 可选 Secrets：AGGIE_MEDIA_UPLOAD_TOKEN、VITE_AGGIE_MEDIA_UPLOAD_TOKEN、VITE_AGGIE_CONTENT_ADMIN_TOKEN
+5) 触发部署：在 Pages 点 Deploy / 刷新主分支
+6) 验证：curl /api/media-upload-image-init 与 /api/media-upload-init
+
+# B. 成功标准
+- `/api/honor` 返回数组
+- `/api/media-upload-image-init` 返回 200
+- `/api/media-upload-init` 返回 200
+- 上传成功后在前台 荣誉墙、师资照、反馈图 三类图能回显
+```
