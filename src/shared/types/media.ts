@@ -4,6 +4,8 @@ export interface MediaAsset {
   id: string
   kind: MediaKind
   name: string
+  title?: string
+  desc?: string
   mimeType: string
   dataUrl: string
   remoteUrl?: string
