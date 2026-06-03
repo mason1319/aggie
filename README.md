@@ -34,6 +34,15 @@ npm run dev
 npm run build
 ```
 
+## Cloudflare Pages 部署
+- GitHub 仓库：`mason1319/aggie`
+- 构建命令：`npm run build`
+- 输出目录：`dist`
+- 自定义域名：`aggieai.me`
+- 推荐开启：`Always Use HTTPS`、`Auto Minify`、`Brotli`
+- 静态缓存：`public/_headers` 已配置 HTML 与静态资源缓存策略
+- SPA 路由：`public/_redirects` 已配置回退到 `index.html`
+
 ## 页面入口
 - 官网首页：`/`
 - 学习体验：`/learn`
@@ -44,4 +53,3 @@ npm run build
 - 当前仓库为完整上传版，包含源码、构建产物和本地依赖目录。
 - 项目使用浏览器本地存储保存学习进度、招生配置和媒体绑定。
 - 后续如需正式上线，建议将媒体存储与数据持久化迁移到云端服务。
-
