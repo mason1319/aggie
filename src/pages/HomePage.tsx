@@ -9,7 +9,7 @@ import { AppHeader } from '../components/AppHeader'
 import { SectionTitle } from '../components/SectionTitle'
 import { WechatModal } from '../components/WechatModal'
 import { courses } from '../data/courses'
-import { getAdmissionSettings, getInstitutionProfile, getMediaAsset } from '../lib/storage'
+import { getAdmissionSettings, getFeedbackLibrary, getInstitutionProfile, getMediaAsset } from '../lib/storage'
 import type { AdmissionCampaign, AdmissionSettings, InstitutionProfile, MediaAsset } from '../types'
 
 const methods = [
@@ -37,11 +37,13 @@ export function HomePage() {
   const [modalTitle, setModalTitle] = useState('添加老师微信')
   const [settings, setSettings] = useState<AdmissionSettings>(() => getAdmissionSettings())
   const [institution, setInstitution] = useState<InstitutionProfile>(() => getInstitutionProfile())
+  const [feedbackEntries, setFeedbackEntries] = useState(() => getFeedbackLibrary().entries.slice(0, 3))
 
   useEffect(() => {
     const refresh = () => {
       setSettings(getAdmissionSettings())
       setInstitution(getInstitutionProfile())
+      setFeedbackEntries(getFeedbackLibrary().entries.slice(0, 3))
     }
     window.addEventListener('storage', refresh)
     window.addEventListener('aggie-storage-change', refresh)
@@ -211,7 +213,7 @@ export function HomePage() {
 
         <section className="section soft-section">
           <div className="container">
-            <SectionTitle eyebrow="机构视频" title="上传你自己的宣传视频与课堂片段" description="后台上传后，首页会自动展示，可用于招生宣传和机构介绍。" />
+            <SectionTitle eyebrow="机构视频" title="上传你自己的宣传视频与课堂片段" description="后台支持批量上传，首页自动展示多条视频素材。" />
             <div className="promo-video-grid">
               {promoVideos.length > 0 ? promoVideos.map((video) => (
                 <article className="promo-video-card" key={video.id}>
@@ -227,6 +229,29 @@ export function HomePage() {
                   <span>进入后台上传招生宣传视频、课堂花絮或家长说明视频后，这里会自动显示。</span>
                 </div>
               )}
+            </div>
+            <div className="section-spacer" />
+            <div className="section-inline-head">
+              <div>
+                <h3>家长与学生反馈</h3>
+                <p>真实反馈可在独立页面上传并展示，支持图片和头像。</p>
+              </div>
+              <Link to="/feedback" className="text-link">打开反馈上传页 <ArrowRight size={17} /></Link>
+            </div>
+            <div className="feedback-preview-grid">
+              {feedbackEntries.map((entry) => (
+                <article className="feedback-preview-card" key={entry.id}>
+                  <div className="feedback-preview-top">
+                    <img src={entry.avatarUrl} alt={entry.name} />
+                    <div>
+                      <strong>{entry.name}</strong>
+                      <span>{entry.subtitle}</span>
+                    </div>
+                    <span className="feedback-role">{entry.role}</span>
+                  </div>
+                  <p>{entry.content}</p>
+                </article>
+              ))}
             </div>
           </div>
         </section>

@@ -10,6 +10,7 @@ import {
   getInstitutionProfile,
   getMediaAsset,
   getMediaBinding,
+  resetFeedbackLibrary,
   resetAdmissionSettings,
   resetMediaState,
   resetInstitutionProfile,
@@ -310,6 +311,7 @@ export function AdminPage() {
   const reset = () => {
     resetAdmissionSettings()
     resetMediaState()
+    resetFeedbackLibrary()
     resetInstitutionProfile()
     setSettings(getAdmissionSettings())
     setInstitution(getInstitutionProfile())

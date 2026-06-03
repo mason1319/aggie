@@ -1,7 +1,10 @@
 import { defaultAdmissionSettings } from '../data/admissions'
+import { defaultFeedbackEntries } from '../data/feedback'
 import { defaultInstitutionProfile } from '../data/institution'
 import type {
   AdmissionSettings,
+  FeedbackEntry,
+  FeedbackLibrary,
   InstitutionProfile,
   MediaAsset,
   MediaBinding,
@@ -16,6 +19,7 @@ export const STORAGE_KEYS = {
   admissions: 'aggie_english_admissions_v1',
   institution: 'aggie_english_institution_v1',
   media: 'aggie_english_media_v1',
+  feedback: 'aggie_english_feedback_v1',
 }
 
 const defaultProgress: ProgressState = {
@@ -45,6 +49,10 @@ function writeJson<T>(key: string, value: T) {
 const defaultMediaLibrary: MediaLibrary = {
   assets: [],
   itemBindings: {},
+}
+
+const defaultFeedbackLibrary: FeedbackLibrary = {
+  entries: defaultFeedbackEntries,
 }
 
 export function getProgress() {
@@ -153,4 +161,26 @@ export function removeMediaAsset(assetId: string) {
 
 export function resetMediaState() {
   resetMediaLibrary()
+}
+
+export function getFeedbackLibrary() {
+  return readJson<FeedbackLibrary>(STORAGE_KEYS.feedback, defaultFeedbackLibrary)
+}
+
+export function saveFeedbackLibrary(library: FeedbackLibrary) {
+  writeJson(STORAGE_KEYS.feedback, library)
+}
+
+export function resetFeedbackLibrary() {
+  saveFeedbackLibrary(defaultFeedbackLibrary)
+}
+
+export function addFeedbackEntry(entry: FeedbackEntry) {
+  const library = getFeedbackLibrary()
+  saveFeedbackLibrary({ entries: [entry, ...library.entries] })
+}
+
+export function removeFeedbackEntry(entryId: string) {
+  const library = getFeedbackLibrary()
+  saveFeedbackLibrary({ entries: library.entries.filter((entry) => entry.id !== entryId) })
 }

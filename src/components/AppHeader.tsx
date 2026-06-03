@@ -30,6 +30,7 @@ export function AppHeader({ onContact }: AppHeaderProps) {
           <NavLink to="/campus" onClick={close}>机构展示</NavLink>
           <a href="/#admissions" onClick={close}>招生报名</a>
           <NavLink to="/learn" onClick={close}>学习体验</NavLink>
+          <NavLink to="/feedback" onClick={close}>反馈上传</NavLink>
           <button className="button button-small button-primary" onClick={() => { close(); onContact?.() }}>
             微信咨询
           </button>

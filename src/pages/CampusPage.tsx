@@ -7,8 +7,8 @@ import { Link } from 'react-router-dom'
 import { AppHeader } from '../components/AppHeader'
 import { SectionTitle } from '../components/SectionTitle'
 import { WechatModal } from '../components/WechatModal'
-import { getInstitutionProfile } from '../lib/storage'
-import type { InstitutionProfile } from '../types'
+import { getInstitutionProfile, getMediaAsset } from '../lib/storage'
+import type { InstitutionProfile, MediaAsset } from '../types'
 
 function iconByName(name: string) {
   switch (name) {
@@ -47,6 +47,9 @@ export function CampusPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('咨询机构详情')
   const [copyLabel, setCopyLabel] = useState('复制地址')
+  const campusVideos = institution.promoVideoAssetIds
+    .map((assetId) => getMediaAsset(assetId))
+    .filter((asset): asset is MediaAsset => asset !== undefined && asset.kind === 'video')
 
   useEffect(() => {
     const refresh = () => setInstitution(getInstitutionProfile())
@@ -117,6 +120,32 @@ export function CampusPage() {
                   </div>
                 </article>
               ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="section soft-section" id="videos">
+          <div className="container">
+            <SectionTitle eyebrow="机构视频" title="宣传视频、课堂片段、家长说明可批量展示" description="支持上传多条视频，不再固定成单一视频卡片。" />
+            <div className="video-count-bar">
+              <strong>{campusVideos.length}</strong>
+              <span>条视频素材</span>
+            </div>
+            <div className="promo-video-grid">
+              {campusVideos.length > 0 ? campusVideos.map((video) => (
+                <article className="promo-video-card" key={video.id}>
+                  <video controls playsInline src={video.dataUrl} />
+                  <div className="promo-video-copy">
+                    <strong>{video.name}</strong>
+                    <span>上传时间：{new Date(video.createdAt).toLocaleDateString('zh-CN')}</span>
+                  </div>
+                </article>
+              )) : (
+                <div className="promo-video-empty">
+                  <strong>还没有视频</strong>
+                  <span>在后台批量上传后，这里会展示多条机构视频。</span>
+                </div>
+              )}
             </div>
           </div>
         </section>
