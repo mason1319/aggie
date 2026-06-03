@@ -20,7 +20,7 @@ interface CompletePayload {
   desc?: string
 }
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+async function handleUploadComplete(context: { request: Request, env: Env }): Promise<Response> {
   if (!canUseAuth(context.request, context.env.AGGIE_MEDIA_UPLOAD_TOKEN)) {
     return jsonResponse({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -83,4 +83,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   return jsonResponse({ uploadId, videoSrc, title, desc })
 }
 
-export const onRequestOptions: PagesFunction = async () => corsPreflightResponse()
+export const onRequest: PagesFunction<Env> = async (context) => {
+  if (context.request.method === 'OPTIONS') {
+    return corsPreflightResponse()
+  }
+  if (context.request.method === 'POST') {
+    return handleUploadComplete(context)
+  }
+  return jsonResponse({ error: 'Method Not Allowed' }, { status: 405 })
+}

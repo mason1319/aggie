@@ -9,7 +9,7 @@ import {
   type Env,
 } from './shared'
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+async function handleUploadChunk(context: { request: Request, env: Env }): Promise<Response> {
   if (!canUseAuth(context.request, context.env.AGGIE_MEDIA_UPLOAD_TOKEN)) {
     return jsonResponse({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -58,4 +58,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   return jsonResponse({ uploadId, chunkIndex })
 }
 
-export const onRequestOptions: PagesFunction = async () => corsPreflightResponse()
+export const onRequest: PagesFunction = async (context) => {
+  if (context.request.method === 'OPTIONS') {
+    return corsPreflightResponse()
+  }
+  if (context.request.method === 'POST') {
+    return handleUploadChunk(context)
+  }
+  return jsonResponse({ error: 'Method Not Allowed' }, { status: 405 })
+}
