@@ -1,0 +1,46 @@
+import type { AdmissionSettings } from '../types'
+
+export const defaultAdmissionSettings: AdmissionSettings = {
+  activeSeason: 'spring',
+  campaigns: [
+    {
+      id: 'trial',
+      title: '免费英语体验课',
+      eyebrow: '先体验，再决定',
+      description: '用一节课体验图片记忆、自然拼读和趣味互动，让孩子感受英语原来可以这样学。',
+      grades: '幼小衔接 · 小学阶段',
+      lessons: '1次完整体验',
+      feature: '学习力测评 + 个性化建议',
+      quota: '每周限量开放',
+      status: '报名中',
+      accent: '#f6c95b',
+      icon: 'sparkles',
+    },
+    {
+      id: 'spring',
+      title: '春季系统提升班',
+      eyebrow: '春季招生',
+      description: '紧跟校内节奏，夯实拼读、词汇与表达，让每一次课堂学习都有积累。',
+      grades: '小学一至六年级',
+      lessons: '16课时系统学习',
+      feature: '课内同步 + 自然拼读',
+      quota: '小班制 · 名额有限',
+      status: '报名中',
+      accent: '#80c8a5',
+      icon: 'sprout',
+    },
+    {
+      id: 'autumn',
+      title: '秋季英语成长班',
+      eyebrow: '秋季招生',
+      description: '从发音到阅读稳步进阶，培养良好的英语学习习惯，为新学期提前准备。',
+      grades: '小学一至六年级',
+      lessons: '16课时系统学习',
+      feature: '发音基础 + 阅读启蒙',
+      quota: '预约登记中',
+      status: '即将开始',
+      accent: '#f3a46f',
+      icon: 'leaf',
+    },
+  ],
+}
